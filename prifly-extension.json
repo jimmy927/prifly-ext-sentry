@@ -1,0 +1,17 @@
+{
+  "id": "sentry",
+  "name": "Sentry issues",
+  "description": "Your Sentry issues in prifly: log in with your own Sentry token, start a session from an issue with its stack trace, breadcrumbs and the whole latest event on disk, and keep the issue on that session's banner.",
+  "version": "0.1.0",
+  "main": "index.ts",
+  "prompt": "prompt.md",
+  "launch": [
+    {
+      "id": "issue",
+      "label": "From a Sentry issue…",
+      "icon": "alert",
+      "description": "Your unresolved issues, newest or most frequent first. Logging in and mapping a Sentry project to its checkout live here too. The session starts knowing the issue: counts, releases, tags, the latest event's stack trace, breadcrumbs and request.",
+      "searchPlaceholder": "Filter by title, culprit, short id, level or project…"
+    }
+  ]
+}

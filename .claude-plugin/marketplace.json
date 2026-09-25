@@ -1,0 +1,15 @@
+{
+  "name": "prifly-ext-sentry",
+  "owner": { "name": "Jimmy Engelbrecht" },
+  "metadata": {
+    "description": "The Sentry prifly extension, as a Claude Code plugin",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "sentry",
+      "description": "Search and read Sentry issues and events, and resolve or ignore one when asked.",
+      "source": "./"
+    }
+  ]
+}

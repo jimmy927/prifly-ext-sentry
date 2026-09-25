@@ -1,0 +1,7 @@
+config.json
+auth.json
+state.json
+issues/
+node_modules/
+skills/*-local/
+__pycache__/

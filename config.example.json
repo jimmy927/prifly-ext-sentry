@@ -1,0 +1,9 @@
+{
+  "org": "",
+  "baseUrl": "https://sentry.io",
+  "projects": {},
+  "query": "is:unresolved",
+  "period": "14d",
+  "sort": "date",
+  "refreshSeconds": 120
+}

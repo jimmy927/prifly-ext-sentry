@@ -1,0 +1,174 @@
+import { describe, expect, test } from "bun:test";
+import { looksLikeToken, parseClirc } from "../auth";
+import { matches } from "../index";
+import { columnOf, issueChip, issueFace, statusActions } from "../issue-face";
+import { readIssue, readNotes, shortRelease } from "../sentry";
+import { ago, when } from "../time";
+import { expandHome, parseConfig, parseState, sortIssues } from "../world";
+import { NOW, rawIssue } from "./fixtures";
+
+const noClirc = { token: "", org: "", url: "" };
+
+describe("parseConfig", () => {
+  test("an empty file gives the defaults", () => {
+    expect(parseConfig({}, {}, noClirc, "/home/me")).toEqual({
+      org: "",
+      baseUrl: "https://sentry.io",
+      projects: {},
+      query: "is:unresolved",
+      period: "14d",
+      sort: "date",
+      refreshSeconds: 120,
+    });
+  });
+
+  test("maps projects to folders, expanding ~ and dropping what is not a folder", () => {
+    const config = parseConfig(
+      { org: "acme", projects: { odi: "~/odi", web: "/srv/web", bad: 3, empty: " " } },
+      {},
+      noClirc,
+      "/home/me",
+    );
+    expect(config.org).toBe("acme");
+    expect(config.projects).toEqual({ odi: "/home/me/odi", web: "/srv/web" });
+  });
+
+  test("the organization and server fall back to the environment, then ~/.sentryclirc", () => {
+    const clirc = { token: "t", org: "from-rc", url: "https://sentry.example.com/" };
+    expect(parseConfig({}, {}, clirc, "/h").org).toBe("from-rc");
+    expect(parseConfig({}, {}, clirc, "/h").baseUrl).toBe("https://sentry.example.com");
+    expect(parseConfig({}, { SENTRY_ORG: "from-env" }, clirc, "/h").org).toBe("from-env");
+  });
+
+  test("an unknown sort is the default, and refreshing is never faster than 30s", () => {
+    const config = parseConfig({ sort: "random", refreshSeconds: 1 }, {}, noClirc, "/h");
+    expect(config.sort).toBe("date");
+    expect(config.refreshSeconds).toBe(30);
+    expect(parseConfig({ sort: "freq" }, {}, noClirc, "/h").sort).toBe("freq");
+  });
+
+  test("expandHome leaves absolute and relative paths alone", () => {
+    expect(expandHome("~", "/h")).toBe("/h");
+    expect(expandHome("/abs", "/h")).toBe("/abs");
+    expect(expandHome("rel/x", "/h")).toBe("rel/x");
+  });
+});
+
+describe("parseState", () => {
+  test("keeps only string links", () => {
+    expect(parseState({ links: { s1: "5001", s2: 7 }, addingProject: true })).toEqual({
+      links: { s1: "5001" },
+      addingProject: true,
+    });
+    expect(parseState(null)).toEqual({ links: {}, addingProject: false });
+  });
+});
+
+describe("auth", () => {
+  test("parseClirc reads the token, org and url from their sections", () => {
+    const text = [
+      "; sentry-cli",
+      "[auth]",
+      "token = sntryu_abc",
+      "[defaults]",
+      'org="acme"',
+      "url=https://sentry.io/",
+      "[other]",
+      "token=not-this-one",
+    ].join("\n");
+    expect(parseClirc(text)).toEqual({
+      token: "sntryu_abc",
+      org: "acme",
+      url: "https://sentry.io/",
+    });
+    expect(parseClirc("")).toEqual(noClirc);
+  });
+
+  test("looksLikeToken takes personal, org and legacy tokens and nothing with spaces", () => {
+    expect(looksLikeToken(`sntryu_${"a".repeat(64)}`)).toBe(true);
+    expect(looksLikeToken(`sntrys_${"b".repeat(40)}==`)).toBe(true);
+    expect(looksLikeToken("f".repeat(64))).toBe(true);
+    expect(looksLikeToken("my token is sntryu_abc")).toBe(false);
+    expect(looksLikeToken("https://sentry.io/settings/")).toBe(false);
+  });
+});
+
+describe("issues", () => {
+  const issue = readIssue(rawIssue);
+
+  test("readIssue takes counts as strings and fills what is missing", () => {
+    expect(issue.count).toBe(84);
+    expect(issue.project).toBe("shop");
+    expect(issue.firstRelease).toBe("1.4.0");
+    expect(issue.assignee).toBe("Ada Lovelace");
+    const bare = readIssue({ id: 9 });
+    expect(bare).toMatchObject({
+      id: "9",
+      title: "(untitled issue)",
+      level: "error",
+      status: "unresolved",
+      count: 0,
+    });
+  });
+
+  test("a release named by a commit SHA is cut to twelve characters", () => {
+    expect(shortRelease("d8bc9c50c73dcc93ac3bdfb898879de60c1aa76d")).toBe("d8bc9c50c73d");
+    expect(shortRelease("shop@1.5.2")).toBe("shop@1.5.2");
+  });
+
+  test("readNotes gives the notes only, oldest first", () => {
+    expect(readNotes(rawIssue).map((note) => note.text)).toEqual(["first!", "seen after deploy"]);
+  });
+
+  test("columns follow Sentry's substatus, unknown ones landing in Ongoing", () => {
+    expect(columnOf(issue)).toBe("escalating");
+    expect(columnOf({ ...issue, substatus: "something_new" })).toBe("ongoing");
+  });
+
+  test("a card and a chip say what the issue is and offer to resolve it", () => {
+    const face = issueFace(issue, false, NOW);
+    expect(face).toMatchObject({
+      key: "5001",
+      group: "escalating",
+      tone: "warning",
+      stripes: ["orange"],
+    });
+    expect(face.detail).toBe("SHOP-1A2 · /api/checkout · 84 events · 3 users · 1h ago");
+    expect(issueFace(issue, true, NOW).detail?.startsWith("shop SHOP-1A2")).toBe(true);
+    const chip = issueChip(issue, NOW);
+    expect(chip.label).toBe("SHOP-1A2: KeyError: 'basket'");
+    expect(chip.url).toBe(issue.permalink);
+    expect(chip.actions?.map((a) => a.id)).toEqual(["resolve", "ignore"]);
+    const resolved = issueChip({ ...issue, status: "resolved", substatus: "" }, NOW);
+    expect(resolved).toMatchObject({
+      tone: "good",
+      icon: "check",
+      label: "SHOP-1A2 resolved: KeyError: 'basket'",
+    });
+    expect(statusActions({ ...issue, status: "ignored" }).map((a) => a.id)).toEqual(["unresolve"]);
+  });
+
+  test("the filter matches every word against title, culprit, id, level and project", () => {
+    expect(matches(issue, "basket checkout")).toBe(true);
+    expect(matches(issue, "shop-1a2")).toBe(true);
+    expect(matches(issue, "basket warning")).toBe(false);
+  });
+
+  test("several projects sort as one list", () => {
+    const a = { ...issue, id: "a", count: 5, lastSeen: "2026-09-25T00:00:00Z" };
+    const b = { ...issue, id: "b", count: 50, lastSeen: "2026-09-24T00:00:00Z" };
+    expect(sortIssues([b, a], "date").map((i) => i.id)).toEqual(["a", "b"]);
+    expect(sortIssues([a, b], "freq").map((i) => i.id)).toEqual(["b", "a"]);
+  });
+});
+
+describe("time", () => {
+  test("when and ago", () => {
+    expect(when("2026-09-25T11:00:59.9Z")).toBe("2026-09-25 11:00 UTC");
+    expect(when("")).toBe("");
+    expect(ago("2026-09-25T11:59:30Z", NOW)).toBe("30s");
+    expect(ago("2026-09-25T11:00:00Z", NOW)).toBe("1h");
+    expect(ago("2026-09-23T12:00:00Z", NOW)).toBe("2d");
+    expect(ago("2026-01-01T00:00:00Z", NOW)).toBe("8mo");
+  });
+});

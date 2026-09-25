@@ -1,0 +1,53 @@
+---
+name: sentry
+description: Search Sentry issues, read an issue with its latest event and stack trace, list an issue's events, save an event's full JSON, and resolve or archive an issue when explicitly asked. Use when the user mentions a Sentry issue (ODI-GC6, a sentry.io/issues/… link), asks what is erroring in production, or wants the stack trace, breadcrumbs or request behind an error.
+---
+
+## Sentry
+
+Wraps `sentry.py`, which sits next to this SKILL.md: run it as `python3 <this skill's folder>/sentry.py`. Standard library only.
+
+Credentials come from the reader's own Sentry login, in this order: `SENTRY_AUTH_TOKEN`; the prifly Sentry extension's `auth.json` (the token they pasted into "From a Sentry issue…"); `~/.sentryclirc` (`sentry-cli login`). The organization comes from `--org`, `SENTRY_ORG`, the extension's `config.json`, then `~/.sentryclirc`. If the script says it is not logged in, say so and stop — never ask the user for a token in chat, and do not go looking for tokens elsewhere.
+
+In prifly, a session started from a Sentry issue already has that issue in its first prompt and the whole latest event saved as JSON on disk (the prompt names the file): read that file before calling the API again. Use this skill for other issues, other events of the same issue, and searching.
+
+### Commands
+
+```bash
+# Search (Sentry search syntax; is:unresolved is added unless the query has an is:)
+python3 <this skill's folder>/sentry.py search "Failed to fetch"
+python3 <this skill's folder>/sentry.py search --project odi --sort freq --limit 10
+python3 <this skill's folder>/sentry.py search "is:resolved release:abc123" --period 30d
+python3 <this skill's folder>/sentry.py search "level:fatal" --json
+
+# One issue: status, counts, notes, and its latest event (in-app frames, breadcrumbs, request, tags)
+python3 <this skill's folder>/sentry.py issue ODI-GC6
+python3 <this skill's folder>/sentry.py issue https://morpheus-0r.sentry.io/issues/7291288169/
+
+# An issue's events, newest first — to see whether it is one user, one release, one host
+python3 <this skill's folder>/sentry.py events ODI-GC6 --limit 20
+
+# One event: latest (default), oldest, recommended, or an event id
+python3 <this skill's folder>/sentry.py event ODI-GC6 oldest
+python3 <this skill's folder>/sentry.py event ODI-GC6 a620bd05fa524911a1e8f64a6bc4793a --full   # every frame
+python3 <this skill's folder>/sentry.py event ODI-GC6 --out /tmp/sentry-ODI-GC6.json            # whole JSON, for jq
+
+# Writes — ONLY when the user explicitly asked for this issue to be resolved / archived / reopened
+python3 <this skill's folder>/sentry.py resolve ODI-GC6
+python3 <this skill's folder>/sentry.py ignore ODI-GC6      # archive until it escalates
+python3 <this skill's folder>/sentry.py unresolve ODI-GC6
+```
+
+Issues are accepted as a short id (`ODI-GC6`), a numeric id, or an issue URL.
+
+### How to work an issue
+
+1. `issue <id>` — read the title, culprit, counts and the latest event's in-app frames.
+2. When the trimmed trace is not enough, `event <id> --out <file>` and read the frames' `context` and `vars`, and every breadcrumb, from the JSON.
+3. `events <id>` when it matters whether the error is new in a release, tied to one user, or everywhere.
+4. Find the cause in the code before proposing a fix.
+
+### Rules
+
+- Reading is free; **resolving, archiving and reopening are writes**. Do them only when the user asked for that specific issue in this conversation — never as a tidy-up after a fix. In prifly the issue's chip on the session banner does this for the user.
+- Sentry events can carry personal data (emails, IPs, request bodies). Quote only what the task needs.

@@ -1,0 +1,16 @@
+{
+  "name": "prifly-ext-sentry",
+  "private": true,
+  "type": "module",
+  "description": "A prifly extension: start a session from a Sentry issue, and keep the issue on its banner.",
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit",
+    "check": "biome check ."
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.14",
+    "@types/bun": "^1.1.14",
+    "typescript": "^7.0.2"
+  }
+}

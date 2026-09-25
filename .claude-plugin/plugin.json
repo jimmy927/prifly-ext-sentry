@@ -1,0 +1,7 @@
+{
+  "name": "sentry",
+  "description": "Reading Sentry from a session: search issues, read an issue and its latest event with the stack trace, list an issue's events, and resolve or ignore one when asked.",
+  "version": "0.1.0",
+  "author": { "name": "Jimmy Engelbrecht" },
+  "homepage": "https://github.com/jimmy927/prifly-ext-sentry"
+}
