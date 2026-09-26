@@ -71,6 +71,21 @@ def settings(org_flag: str | None) -> tuple[str, str, str]:
     return (base or "https://sentry.io").rstrip("/") + "/api/0", token, org
 
 
+def needed_permission(method: str, path: str) -> str:
+    """Which of Sentry's token permissions a call needs, for a 403's message.
+
+    Mirrors auth.ts's neededPermission: the organization and project-list
+    paths are checked first, then the method falls back to an issue or event.
+    """
+    if path == "/auth/" or path == "/organizations/":
+        return "Organization: Read"
+    if re.fullmatch(r"/organizations/[^/]+/projects/", path):
+        return "Project: Read"
+    if method == "PUT":
+        return "Issue & Event: Read & Write"
+    return "Issue & Event: Read"
+
+
 class Api:
     def __init__(self, root: str, token: str, org: str) -> None:
         self.root, self.token, self.org = root, token, org
@@ -86,6 +101,11 @@ class Api:
             with urllib.request.urlopen(req, timeout=30) as resp:
                 return json.loads(resp.read() or b"null")
         except urllib.error.HTTPError as err:
+            if err.code == 403:
+                sys.exit(
+                    f"Sentry {method} {path}: 403 — the token needs {needed_permission(method, path)}. "
+                    "Make a new token with that raised and log in again."
+                )
             sys.exit(f"Sentry {method} {path}: {err.code} {err.read()[:300].decode(errors='replace')}")
 
     def issue_id(self, ref: str) -> str:

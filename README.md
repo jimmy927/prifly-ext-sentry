@@ -45,9 +45,24 @@ Open **From a Sentry issue…** and follow the rows it shows:
 
 1. **Open Sentry's auth token page** — your browser opens
    [sentry.io/settings/account/api/auth-tokens](https://sentry.io/settings/account/api/auth-tokens/).
-   Create a new token with **Issue & Event: Read & Write**, **Project: Read**
-   and **Organization: Read** (read-only works too; resolving from the chip then
-   fails with a 403).
+   "Create New Token" lists a Name field and one permission dropdown per
+   category, in this order — fill in exactly this, and the chooser repeats it
+   on the row and again once the page is open:
+
+   | Field | Value | Why |
+   |---|---|---|
+   | Name | `prifly` | so you recognize it later on that same page |
+   | Project | Read | lists a project's issues and the projects to map |
+   | Team | No Access | nothing here calls a team endpoint |
+   | Release | No Access | releases come embedded in issue and event data (`firstRelease`, `lastRelease`, the `release` tag) — nothing calls Sentry's own releases endpoint |
+   | Issue & Event | Read & Write | reads issues and events, and **Read & Write** is what lets the chip's menu resolve, archive or reopen one — Read alone works for everything else, and those actions then fail with a 403 |
+   | Organization | Read | lists your organizations and is what `/auth/` (the token check) needs |
+   | Member | No Access | nothing here calls a member endpoint |
+   | Alerts | No Access | nothing here calls an alert-rule endpoint |
+
+   A token that is missing a permission a call needs fails with Sentry's own
+   403, and the extension's error (and the `sentry.py` skill's) names which
+   permission to raise.
 2. **Paste the token Sentry shows you** — one paste, once. It is checked
    against Sentry there and then and kept in `auth.json` in this folder,
    readable only by you.

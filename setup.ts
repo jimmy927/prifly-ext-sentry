@@ -99,14 +99,24 @@ function loginLine(world: World): string {
   return `Signed in${who} with the token from ${login.source}`;
 }
 
+/**
+ * What "Create New Token" needs, in the order Sentry's own page shows the
+ * permissions: Name, then Project, Team, Release, Issue & Event,
+ * Organization, Member, Alerts. Kept in one place so the chooser row and the
+ * message shown after opening the page never drift apart.
+ */
+const TOKEN_PERMISSIONS =
+  "Name: prifly. Project: Read. Team: No Access. Release: No Access. " +
+  "Issue & Event: Read & Write (Read alone works, but Resolve/Archive/Unresolve then fail with 403). " +
+  "Organization: Read. Member: No Access. Alerts: No Access.";
+
 function loginRows(world: World): LaunchChoice[] {
   return [
     {
       key: KEYS.open,
       title: "1. Open Sentry's auth token page",
       group: "Log in",
-      detail:
-        "Sign in as you always do, then “Create New Token” with Issue & Event: Read & Write, Project: Read and Organization: Read.",
+      detail: `Sign in as you always do, then “Create New Token” with — ${TOKEN_PERMISSIONS}`,
       tone: "info",
       url: tokenPageUrl(world.config.baseUrl),
     },
@@ -199,16 +209,18 @@ export async function runSetup(world: World, key: string, input: string): Promis
   return null;
 }
 
+/** What to say once the token page is (or is not) open — kept pure so it is testable without a browser. */
+export function tokenPageMessage(opened: boolean, url: string): string {
+  return opened
+    ? `${TOKEN_PERMISSIONS} Then pick “2. Paste the token”.`
+    : `Open this, create a token, then pick “2. Paste the token”: ${url}\n\n${TOKEN_PERMISSIONS}`;
+}
+
 async function openTokenPage(world: World): Promise<Launch> {
   const url = tokenPageUrl(world.config.baseUrl);
   const opened = await openBrowser(url);
   world.api.log("token_page", { opened });
-  return {
-    prompt: "",
-    message: opened
-      ? "Create a token in your browser, then pick “2. Paste the token”."
-      : `Open this, create a token, then pick “2. Paste the token”: ${url}`,
-  };
+  return { prompt: "", message: tokenPageMessage(opened, url) };
 }
 
 async function saveToken(world: World, input: string): Promise<Launch> {

@@ -92,15 +92,34 @@ export function readNotes(raw: unknown): { by: string; at: string; text: string 
     .reverse();
 }
 
+/**
+ * Which of Sentry's token permissions a call needs, in the words the "Create
+ * New Token" page uses — for a 403's message. Order matters: the exact
+ * organization and project-list paths are checked before the method falls
+ * back to "an issue or event".
+ */
+function neededPermission(method: string, path: string): string {
+  if (path === "/auth/" || path === "/organizations/") return "Organization: Read";
+  if (/^\/organizations\/[^/]+\/projects\/$/.test(path)) return "Project: Read";
+  if (method === "PUT") return "Issue & Event: Read & Write";
+  return "Issue & Event: Read";
+}
+
 export class SentryError extends Error {
   readonly status: number;
-  constructor(path: string, status: number, detail: string) {
-    super(
-      status === 401
-        ? "Sentry refused the token (401). Log in again from “From a Sentry issue…”."
-        : `Sentry ${path}: ${status}${detail === "" ? "" : ` ${detail}`}`,
-    );
+  constructor(method: string, path: string, status: number, detail: string) {
+    super(SentryError.describe(method, path, status, detail));
     this.status = status;
+  }
+
+  private static describe(method: string, path: string, status: number, detail: string): string {
+    if (status === 401) {
+      return "Sentry refused the token (401). Log in again from “From a Sentry issue…”.";
+    }
+    if (status === 403) {
+      return `Sentry refused this (403) — the token needs ${neededPermission(method, path)}. Make a new token with that raised and log in again.`;
+    }
+    return `Sentry ${path}: ${status}${detail === "" ? "" : ` ${detail}`}`;
   }
 }
 
@@ -122,7 +141,7 @@ async function call(
   const response = await fetch(url, init);
   if (!response.ok) {
     const detail = str(obj(await response.json().catch(() => null))["detail"]);
-    throw new SentryError(path, response.status, detail);
+    throw new SentryError(method, path, response.status, detail);
   }
   return await response.json();
 }
