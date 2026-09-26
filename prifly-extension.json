@@ -10,7 +10,7 @@
       "id": "issue",
       "label": "From a Sentry issue…",
       "icon": "alert",
-      "description": "Your unresolved issues, newest or most frequent first. Logging in and mapping a Sentry project to its checkout live here too. The session starts knowing the issue: counts, releases, tags, the latest event's stack trace, breadcrumbs and request.",
+      "description": "Your unresolved issues, newest or most frequent first, once you have logged in and mapped a Sentry project to its checkout: both happen here. The session starts knowing the issue: counts, releases, tags, the latest event's stack trace, breadcrumbs and request.",
       "searchPlaceholder": "Filter by title, culprit, short id, level or project…"
     }
   ]

@@ -127,6 +127,8 @@ export type LaunchChoice = {
  * What a launcher offers, as a board: the columns, and the items in them.
  * An extension that answers with a plain array has no columns, and the window
  * draws a list — which is what a launcher still being set up should give.
+ * Only a board gets the filter field over it: a list of log-in steps has
+ * nothing in it to search.
  */
 export type LaunchBoard = {
   columns: LaunchColumn[];
