@@ -135,7 +135,7 @@ export function issueChip(issue: Issue, now: number): Decoration {
   const seen = ago(issue.lastSeen, now);
   return {
     key: issue.id,
-    icon: issue.status === "resolved" ? "check" : "alert",
+    icon: issue.status === "resolved" ? "bug-off" : "bug",
     label: `${issue.shortId}${issue.status === "unresolved" ? "" : ` ${issue.status}`}: ${clip(issue.title, 40)}`,
     tone: issueTone(issue),
     details: [
