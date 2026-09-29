@@ -92,7 +92,7 @@ export function statusActions(issue: Issue): DecorationAction[] {
     {
       id: "ignore",
       label: "Archive until it escalates",
-      confirm: `${issue.shortId} “${name}” leaves the unresolved list until it happens much more often.`,
+      confirm: `${issue.shortId} “${name}” leaves the unresolved list until it happens much more often, and your bookmarks for good.`,
       destructive: true,
     },
   ];

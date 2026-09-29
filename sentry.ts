@@ -240,7 +240,8 @@ export type StatusChange = "resolved" | "unresolved" | "ignored";
 
 /**
  * An issue resolved, reopened, or archived until it escalates — the one write
- * this extension makes, and only from a menu the reader chose.
+ * this extension makes, and only from a menu the reader chose. Archiving also
+ * takes the issue off the reader's bookmarks, Sentry's favourites.
  */
 export async function setStatus(
   creds: Creds,
@@ -250,7 +251,7 @@ export async function setStatus(
 ): Promise<void> {
   const body: Json =
     status === "ignored"
-      ? { status, statusDetails: {}, substatus: "archived_until_escalating" }
+      ? { status, statusDetails: {}, substatus: "archived_until_escalating", isBookmarked: false }
       : { status };
   await call(creds, "PUT", `/organizations/${enc(org)}/issues/${enc(id)}/`, {}, body);
 }
