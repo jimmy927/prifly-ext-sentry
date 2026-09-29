@@ -110,7 +110,7 @@ export async function choices(
     columns: COLUMNS,
     items: at.issues
       .filter((issue) => matches(issue, words))
-      .map((issue) => issueFace(issue, several, now)),
+      .map((issue) => issueFace(issue, several, now, at.sparks.get(issue.id))),
     actions: setupTail(at),
   };
 }

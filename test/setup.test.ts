@@ -29,6 +29,7 @@ function fakeWorld(): World {
     issues: [],
     loadedAt: 0,
     linked: new Map(),
+    sparks: new Map(),
   };
 }
 

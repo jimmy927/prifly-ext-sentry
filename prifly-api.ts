@@ -106,6 +106,15 @@ export type LaunchBadges = {
   dueLate?: boolean;
 };
 
+/** How often it happened over one period, as bars, oldest first. */
+export type LaunchSpark = {
+  /** Its name on the board's period switch: "1h", "24h", "7d". */
+  period: string;
+  counts: number[];
+  /** Everything in the period, for the words beside the bars. */
+  total?: number;
+};
+
 /** One thing a launcher can start a session from: a card, an issue, a ticket. */
 export type LaunchChoice = {
   /** The extension's own name for it; handed back when the reader picks it. */
@@ -115,6 +124,10 @@ export type LaunchChoice = {
   group?: string;
   /** A line under the title: who is on it, when it is due. */
   detail?: string;
+  /** Where it comes from, in code type, right under the title: a culprit. */
+  sub?: string;
+  /** How often it happened, one per period; the board switches between them. */
+  sparks?: LaunchSpark[];
   tone?: DecorationTone;
   /** Picking it asks this first; what is typed reaches `launch` as `input`. */
   input?: { title: string; placeholder?: string };

@@ -19,6 +19,7 @@ import type {
   LauncherFlag,
   LaunchItem,
   LaunchItemNote,
+  LaunchSpark,
 } from "./prifly-api";
 import { clip } from "./read";
 import type { Issue } from "./sentry";
@@ -97,25 +98,36 @@ export function statusActions(issue: Issue): DecorationAction[] {
   ];
 }
 
-/** A line under the card's title: `ODI-GC6 · /api/emailstat · 3d ago`. */
-function detail(issue: Issue, withProject: boolean, now: number): string {
+/**
+ * The line at the foot of the card: `ODI-GC6 · 3 users · 3d ago`. The culprit
+ * has its own line and the bars say how many events; without bars, the
+ * events and the culprit are said here instead.
+ */
+function detail(issue: Issue, withProject: boolean, now: number, barred: boolean): string {
   const seen = ago(issue.lastSeen, now);
   return [
     withProject ? `${issue.project} ${issue.shortId}` : issue.shortId,
-    clip(issue.culprit, 60),
-    `${issue.count} events · ${issue.userCount} users`,
+    barred ? "" : clip(issue.culprit, 60),
+    barred ? `${issue.userCount} users` : `${issue.count} events · ${issue.userCount} users`,
     seen === "" ? "" : `${seen} ago`,
   ]
     .filter((part) => part !== "")
     .join(" · ");
 }
 
-export function issueFace(issue: Issue, withProject: boolean, now: number): LaunchChoice {
+export function issueFace(
+  issue: Issue,
+  withProject: boolean,
+  now: number,
+  sparks: LaunchSpark[] = [],
+): LaunchChoice {
   return {
     key: issue.id,
     title: issue.title,
     group: columnOf(issue),
-    detail: detail(issue, withProject, now),
+    detail: detail(issue, withProject, now, sparks.length > 0),
+    sub: sparks.length > 0 ? issue.culprit : "",
+    sparks,
     tone: issueTone(issue),
     url: issue.permalink,
     stripes: [levelColour(issue.level)],

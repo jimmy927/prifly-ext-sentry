@@ -127,7 +127,8 @@ async function call(
   creds: Creds,
   method: "GET" | "PUT",
   path: string,
-  params: Record<string, string> = {},
+  // Pairs when a name repeats: `groups=1&groups=2`.
+  params: Record<string, string> | [string, string][] = {},
   body?: Json,
 ): Promise<unknown> {
   const query = new URLSearchParams(params).toString();
@@ -187,6 +188,37 @@ export async function projectIssues(
     }),
   );
   return found.map(readIssue).map((issue) => ({ ...issue, project: issue.project || project }));
+}
+
+/**
+ * Events per bucket over `period`, oldest first, for each of these issues.
+ *
+ * The project issue list gives bars only for `24h` and `14d`; this endpoint
+ * takes any period, and `groupStatsPeriod=auto` cuts it into about thirty
+ * buckets — two minutes each over an hour, an hour over a day, six hours over
+ * a week (measured against sentry.io, 2026-09-29).
+ */
+export async function issueStats(
+  creds: Creds,
+  org: string,
+  ids: string[],
+  period: string,
+): Promise<Map<string, number[]>> {
+  const params: [string, string][] = ids.map((id) => ["groups", id]);
+  params.push(["groupStatsPeriod", "auto"], ["statsPeriod", period]);
+  const found = arr(await call(creds, "GET", `/organizations/${enc(org)}/issues-stats/`, params));
+  const counts = new Map<string, number[]>();
+  for (const entry of found.map(obj)) {
+    const buckets = arr(obj(entry["stats"])["auto"]);
+    counts.set(
+      str(entry["id"]),
+      buckets.map((bucket) => {
+        const count = arr(bucket)[1];
+        return typeof count === "number" ? count : 0;
+      }),
+    );
+  }
+  return counts;
 }
 
 /** One issue, read from its own endpoint: releases and activity included. */

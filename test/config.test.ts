@@ -135,6 +135,13 @@ describe("issues", () => {
     });
     expect(face.detail).toBe("SHOP-1A2 · /api/checkout · 84 events · 3 users · 1h ago");
     expect(issueFace(issue, true, NOW).detail?.startsWith("shop SHOP-1A2")).toBe(true);
+    // With bars, the culprit moves to its own line and the bars count the events.
+    const spark = { period: "24h", counts: [0, 2, 5], total: 7 };
+    const barred = issueFace(issue, false, NOW, [spark]);
+    expect(barred.sub).toBe("/api/checkout");
+    expect(barred.sparks).toEqual([spark]);
+    expect(barred.detail).toBe("SHOP-1A2 · 3 users · 1h ago");
+    expect(face.sub).toBe("");
     const chip = issueChip(issue, NOW);
     expect(chip.label).toBe("SHOP-1A2: KeyError: 'basket'");
     expect(chip.url).toBe(issue.permalink);

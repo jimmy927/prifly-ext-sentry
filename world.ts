@@ -11,12 +11,13 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { type Clirc, findLogin, type Login, readClirc } from "./auth";
-import type { ExtensionApi } from "./prifly-api";
+import type { ExtensionApi, LaunchSpark } from "./prifly-api";
 import { obj, str } from "./read";
 import {
   type Creds,
   type Issue,
   issueDetail,
+  issueStats,
   projectIssues,
   SentryError,
   type Sort,
@@ -55,6 +56,8 @@ export type World = {
   loadedAt: number;
   /** The issues on sessions' banners, by id, whatever their status now. */
   linked: Map<string, Issue>;
+  /** Each listed issue's bars, by id, one per `SPARK_PERIODS` entry; empty when Sentry would not say. */
+  sparks: Map<string, LaunchSpark[]>;
 };
 
 const SORTS: readonly Sort[] = ["date", "new", "freq", "user"];
@@ -134,10 +137,17 @@ export async function load(api: ExtensionApi): Promise<World> {
     issues: [],
     loadedAt: 0,
     linked: new Map(),
+    sparks: new Map(),
   };
 }
 
 const PER_PROJECT = 100;
+
+/** The periods a card's bars cover, in the order the board's switch offers them. */
+export const SPARK_PERIODS = ["1h", "24h", "7d"] as const;
+
+/** Issues per stats request, as Sentry's own issue stream asks for them. */
+const STATS_BATCH = 25;
 
 /**
  * What Sentry has now: the chooser's issues for every mapped project, and the
@@ -154,6 +164,7 @@ export async function reload(world: World): Promise<void> {
     ),
   );
   world.issues = sortIssues(lists.flat(), sort);
+  world.sparks = await sparksOf(world, auth, org);
   world.loadedAt = Date.now();
   const known = new Set(world.api.sessions().map((session) => session.id));
   const wanted = new Set(
@@ -167,6 +178,48 @@ export async function reload(world: World): Promise<void> {
     if (found !== null) linked.set(id, found);
   }
   world.linked = linked;
+}
+
+/**
+ * The listed issues' bars over each period. Bars are extra: when Sentry will
+ * not give them, the board still comes, only without its bars — the counts
+ * then stay in each card's detail line.
+ */
+async function sparksOf(
+  world: World,
+  auth: Creds,
+  org: string,
+): Promise<Map<string, LaunchSpark[]>> {
+  const ids = world.issues.map((issue) => issue.id);
+  const batches: string[][] = [];
+  for (let at = 0; at < ids.length; at += STATS_BATCH)
+    batches.push(ids.slice(at, at + STATS_BATCH));
+  try {
+    const periods = await Promise.all(
+      SPARK_PERIODS.map(async (period) => {
+        const found = await Promise.all(
+          batches.map((batch) => issueStats(auth, org, batch, period)),
+        );
+        return { period, counts: new Map(found.flatMap((map) => [...map])) };
+      }),
+    );
+    const sparks = new Map<string, LaunchSpark[]>();
+    for (const id of ids) {
+      sparks.set(
+        id,
+        periods.map(({ period, counts }) => {
+          const bars = counts.get(id) ?? [];
+          return { period, counts: bars, total: bars.reduce((sum, count) => sum + count, 0) };
+        }),
+      );
+    }
+    return sparks;
+  } catch (caught) {
+    world.api.log("sparks_failed", {
+      message: caught instanceof Error ? caught.message : String(caught),
+    });
+    return new Map();
+  }
 }
 
 /** An issue that is not in the list: read on its own, or null once Sentry has deleted it. */
