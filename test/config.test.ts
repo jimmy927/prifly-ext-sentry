@@ -149,7 +149,7 @@ describe("issues", () => {
     const resolved = issueChip({ ...issue, status: "resolved", substatus: "" }, NOW);
     expect(resolved).toMatchObject({
       tone: "good",
-      icon: "bug-off",
+      icon: "sentry",
       label: "SHOP-1A2 resolved: KeyError: 'basket'",
     });
     expect(statusActions({ ...issue, status: "ignored" }).map((a) => a.id)).toEqual(["unresolve"]);

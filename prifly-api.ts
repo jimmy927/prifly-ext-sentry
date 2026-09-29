@@ -41,6 +41,7 @@ export type DecorationIcon =
   | "chart"
   | "bug"
   | "bug-off"
+  | "sentry"
   | "dot";
 
 /** One item in a chip's own menu: "Move to Doing" on a Trello card. */
