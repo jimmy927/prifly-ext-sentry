@@ -20,6 +20,9 @@
 
 export type DecorationTone = "good" | "warning" | "critical" | "info" | "muted";
 
+/** A launcher button's glow: its colour, and a line for its hover ("3 open errors"). */
+export type LauncherFlag = { tone: DecorationTone; hint?: string };
+
 /** One of the icons the window has: see `DECORATION_ICONS` in `@prifly/wire`. */
 export type DecorationIcon =
   | "server"
@@ -212,6 +215,12 @@ export type ExtensionApi = {
    * items for an id no session has, and `unclaimed`, go to the status bar.
    */
   show(bySession: Record<string, Decoration[]>, unclaimed: Decoration[]): void;
+  /**
+   * Make the launcher `launchId`'s button glow in `tone`'s colour, `hint`
+   * added to its hover — something waiting behind it, such as open errors.
+   * Null puts it out. Missing from a prifly older than the call.
+   */
+  flag?(launchId: string, flag: LauncherFlag | null): void;
   /**
    * Carry out an action the reader chose from an item's right-click menu.
    * What it returns is shown to them ("Destroyed lc-box1"); what it throws is

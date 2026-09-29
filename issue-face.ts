@@ -16,6 +16,7 @@ import type {
   LabelColour,
   LaunchChoice,
   LaunchColumn,
+  LauncherFlag,
   LaunchItem,
   LaunchItemNote,
 } from "./prifly-api";
@@ -54,6 +55,25 @@ export function issueTone(issue: Issue): DecorationTone {
   if (issue.level === "fatal") return "critical";
   if (issue.substatus === "escalating" || issue.substatus === "regressed") return "warning";
   return "info";
+}
+
+/**
+ * The launcher button's glow: red while any open issue is a fatal or an
+ * error, orange while the open ones are only warnings or info, out when
+ * nothing is open. Debug never lights it.
+ */
+export function launcherFlag(issues: readonly Issue[]): LauncherFlag | null {
+  const open = issues.filter((issue) => issue.status !== "resolved" && issue.status !== "ignored");
+  const errors = open.filter((issue) => issue.level === "fatal" || issue.level === "error");
+  if (errors.length > 0) return { tone: "critical", hint: plural(errors.length, "open error") };
+  const warnings = open.filter((issue) => issue.level === "warning" || issue.level === "info");
+  if (warnings.length > 0)
+    return { tone: "warning", hint: plural(warnings.length, "open warning") };
+  return null;
+}
+
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
 }
 
 /** What the issue's menu offers for the status it has now. */

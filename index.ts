@@ -19,7 +19,7 @@
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { eventId } from "./event";
-import { COLUMNS, issueChip, issueFace, issueItem } from "./issue-face";
+import { COLUMNS, issueChip, issueFace, issueItem, launcherFlag } from "./issue-face";
 import { issuePrompt } from "./issue-prompt";
 import type {
   Decoration,
@@ -87,6 +87,7 @@ function show(): void {
     bySession[sessionId] = [issueChip(issue, now)];
   }
   at.api.show(bySession, []);
+  at.api.flag?.("issue", launcherFlag(at.issues));
 }
 
 /**
@@ -163,7 +164,10 @@ export async function launch(_launchId: string, key: string, input: string): Pro
       if (ready(at)) {
         await reload(at);
         show();
-      } else at.api.show({}, []);
+      } else {
+        at.api.show({}, []);
+        at.api.flag?.("issue", null);
+      }
       return done;
     }
   }
