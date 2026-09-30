@@ -103,29 +103,41 @@ export function statusActions(issue: Issue): DecorationAction[] {
  * has its own line and the bars say how many events; without bars, the
  * events and the culprit are said here instead.
  */
-function detail(issue: Issue, withProject: boolean, now: number, barred: boolean): string {
+function detail(
+  issue: Issue,
+  withProject: boolean,
+  now: number,
+  barred: boolean,
+  folderNote: string,
+): string {
   const seen = ago(issue.lastSeen, now);
   return [
     withProject ? `${issue.project} ${issue.shortId}` : issue.shortId,
     barred ? "" : clip(issue.culprit, 60),
     barred ? `${issue.userCount} users` : `${issue.count} events · ${issue.userCount} users`,
     seen === "" ? "" : `${seen} ago`,
+    folderNote,
   ]
     .filter((part) => part !== "")
     .join(" · ");
 }
 
+/**
+ * An issue as a card. `folderNote` says why a session from it will ask for
+ * its folder — "no code mapping for odi" — and is "" when the folder is known.
+ */
 export function issueFace(
   issue: Issue,
   withProject: boolean,
   now: number,
   sparks: LaunchSpark[] = [],
+  folderNote = "",
 ): LaunchChoice {
   return {
     key: issue.id,
     title: issue.title,
     group: columnOf(issue),
-    detail: detail(issue, withProject, now, sparks.length > 0),
+    detail: detail(issue, withProject, now, sparks.length > 0, folderNote),
     sub: sparks.length > 0 ? issue.culprit : "",
     sparks,
     tone: issueTone(issue),

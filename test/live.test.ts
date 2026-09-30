@@ -9,10 +9,11 @@ import { describe, expect, test } from "bun:test";
 import { exceptions } from "../event";
 import { issuePrompt } from "../issue-prompt";
 import {
+  codeMappings,
   issueDetail,
   latestEvent,
+  organizationIssues,
   organizations,
-  projectIssues,
   projects,
   readNotes,
   whoami,
@@ -31,9 +32,16 @@ describe.skipIf(skip)("live Sentry (GET only)", () => {
     expect((await projects(creds, org)).map((entry) => entry.slug)).toContain(project);
   }, 60_000);
 
+  test("code mappings name a repo for each project they are about", async () => {
+    for (const mapping of await codeMappings(creds, org)) {
+      expect(mapping.project).not.toBe("");
+      expect(mapping.repo).toMatch(/\//);
+    }
+  }, 60_000);
+
   test("every listed issue reads, and the first few make a prompt from their latest event", async () => {
     for (const sort of ["date", "freq"] as const) {
-      const issues = await projectIssues(creds, org, project, {
+      const issues = await organizationIssues(creds, org, {
         query: "is:unresolved",
         period: "14d",
         sort,
@@ -43,7 +51,7 @@ describe.skipIf(skip)("live Sentry (GET only)", () => {
       for (const issue of issues) {
         expect(issue.id).not.toBe("");
         expect(issue.shortId).not.toBe("");
-        expect(issue.project).toBe(project);
+        expect(issue.project).not.toBe("");
         expect(issue.permalink.startsWith("https://")).toBe(true);
       }
       for (const listed of issues.slice(0, 5)) {

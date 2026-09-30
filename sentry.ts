@@ -100,6 +100,7 @@ export function readNotes(raw: unknown): { by: string; at: string; text: string 
  */
 function neededPermission(method: string, path: string): string {
   if (path === "/auth/" || path === "/organizations/") return "Organization: Read";
+  if (/^\/organizations\/[^/]+\/code-mappings\/$/.test(path)) return "Organization: Read";
   if (/^\/organizations\/[^/]+\/projects\/$/.test(path)) return "Project: Read";
   if (method === "PUT") return "Issue & Event: Read & Write";
   return "Issue & Event: Read";
@@ -170,24 +171,54 @@ export async function projects(creds: Creds, org: string): Promise<Named[]> {
   }));
 }
 
+/**
+ * Which repository a project's stack frames come from, as the organization's
+ * source-code integration has it: `repo` is the provider's `owner/name`.
+ * Sentry makes some by itself (`automatic`) from paths it saw in frames —
+ * often vendored or long-gone repos — besides the ones a person set up.
+ */
+export type CodeMapping = {
+  project: string;
+  repo: string;
+  branch: string;
+  stackRoot: string;
+  automatic: boolean;
+};
+
+/** Every code mapping in the organization, for all its projects at once. */
+export async function codeMappings(creds: Creds, org: string): Promise<CodeMapping[]> {
+  const found = arr(await call(creds, "GET", `/organizations/${enc(org)}/code-mappings/`));
+  return found.map(obj).map((mapping) => ({
+    project: str(mapping["projectSlug"]),
+    repo: str(mapping["repoName"]),
+    branch: str(mapping["defaultBranch"]),
+    stackRoot: str(mapping["stackRoot"]),
+    automatic: mapping["automaticallyGenerated"] === true,
+  }));
+}
+
 export type IssueQuery = { query: string; period: string; sort: Sort; limit: number };
 
-/** One project's issues, as the configured query and sort have them. */
-export async function projectIssues(
+/**
+ * The organization's issues, every project the token can see at once
+ * (`project=-1`), as the configured query and sort have them — so a project
+ * made in Sentry tomorrow is listed without anything set up here.
+ */
+export async function organizationIssues(
   creds: Creds,
   org: string,
-  project: string,
   ask: IssueQuery,
 ): Promise<Issue[]> {
   const found = arr(
-    await call(creds, "GET", `/projects/${enc(org)}/${enc(project)}/issues/`, {
+    await call(creds, "GET", `/organizations/${enc(org)}/issues/`, {
+      project: "-1",
       query: ask.query,
       statsPeriod: ask.period,
       sort: ask.sort,
       limit: String(ask.limit),
     }),
   );
-  return found.map(readIssue).map((issue) => ({ ...issue, project: issue.project || project }));
+  return found.map(readIssue);
 }
 
 /**

@@ -2,7 +2,7 @@
 
 A [prifly](https://github.com/jimmy927/prifly) extension that puts your Sentry
 issues into the window. **From a Sentry issue…**, beside New session, lays out
-the unresolved issues of the projects you mapped, in Sentry's own triage
+the unresolved issues of every project in your organization, in Sentry's own triage
 columns (New, Escalating, Regressed, Ongoing), sorted by when they were last
 seen or by how many events they have. The issue you pick becomes a session in
 that project's checkout that already knows the issue: the counts, first and
@@ -52,11 +52,11 @@ Open **From a Sentry issue…** and follow the rows it shows:
    | Field | Value | Why |
    |---|---|---|
    | Name | `prifly` | so you recognize it later on that same page |
-   | Project | Read | lists a project's issues and the projects to map |
+   | Project | Read | lists the projects' issues |
    | Team | No Access | nothing here calls a team endpoint |
    | Release | No Access | releases come embedded in issue and event data (`firstRelease`, `lastRelease`, the `release` tag) — nothing calls Sentry's own releases endpoint |
    | Issue & Event | Read & Write | reads issues and events, and **Read & Write** is what lets the chip's menu resolve, archive or reopen one — Read alone works for everything else, and those actions then fail with a 403 |
-   | Organization | Read | lists your organizations and is what `/auth/` (the token check) needs |
+   | Organization | Read | lists your organizations, is what `/auth/` (the token check) needs, and reads the code mappings that suggest a project's checkout |
    | Member | No Access | nothing here calls a member endpoint |
    | Alerts | No Access | nothing here calls an alert-rule endpoint |
 
@@ -66,10 +66,29 @@ Open **From a Sentry issue…** and follow the rows it shows:
 2. **Paste the token Sentry shows you** — one paste, once. It is checked
    against Sentry there and then and kept in `auth.json` in this folder,
    readable only by you.
-3. **Choose an organization**, then **map a project to its checkout** — pick
-   the project and type the folder it is checked out in (for a project called
-   `odi` it suggests `~/odi` or `~/src/odi` when that is a git checkout; leave
-   the field empty to take the suggestion).
+3. **Choose an organization** — and that is all. Every project in it is
+   listed, including ones made in Sentry later; there are no projects to map.
+
+## Where a session starts
+
+Nothing to configure: when you start a session from an issue, its folder is
+worked out then (`checkout.ts`). Sentry knows which repository a project's
+code is in — its **code mappings**, under Settings → Integrations → GitHub (or
+GitLab…) → Code Mappings — and this machine knows where that repository is
+checked out. Looked for in this order:
+
+1. a folder pinned to the project in `config.json`'s `projects` (optional);
+2. the checkout the project's last session ran in (remembered in `state.json`);
+3. the checkout behind any folder a prifly session on this machine runs in;
+4. a checkout in `~`, `~/src` or `~/code` whose git remote is the repo — a
+   hand-made mapping of the whole stack wins over ones Sentry generated;
+5. without a code mapping, `~/<slug>`, `~/src/<slug>` or `~/code/<slug>` when
+   that is a git checkout.
+
+Found nowhere, the issue's card says why ("no code mapping in Sentry for web:
+you pick the folder") and prifly's New session form asks for the folder. The
+checkout you pick there is remembered for that project's next session. Give a
+project a code mapping in Sentry and none of this is needed.
 
 If you already use `sentry-cli`, there is nothing to paste: a token in
 `SENTRY_AUTH_TOKEN` (in the environment prifly's host starts with) or in
@@ -78,7 +97,7 @@ If you already use `sentry-cli`, there is nothing to paste: a token in
 token in any other way, and sessions are told never to ask for one.
 
 The rows kept beside the issues change any of it later: **Sort by events / last
-seen**, **Map a project…**, **Switch organization…**, **Log out of Sentry**
+seen**, **Switch organization…**, **Log out of Sentry**
 (which deletes `auth.json`; a token from `SENTRY_AUTH_TOKEN` or
 `~/.sentryclirc` is sentry-cli's, and stays).
 
@@ -91,7 +110,7 @@ Written by the setup rows; edit it by hand if you like
 {
   "org": "morpheus-0r",
   "baseUrl": "https://sentry.io",
-  "projects": { "odi": "/home/jimmy/odi" },
+  "projects": {},
   "query": "is:unresolved",
   "period": "14d",
   "sort": "date",
@@ -99,8 +118,9 @@ Written by the setup rows; edit it by hand if you like
 }
 ```
 
-- `projects` — Sentry project slug → the checkout its sessions start in. Every
-  mapped project's issues are listed; `~` is expanded.
+- `projects` — optional: Sentry project slug → a folder its sessions always
+  start in, over whatever is found (`~` is expanded). Usually empty. It no
+  longer decides which projects are listed: all of them are.
 - `query` — Sentry search syntax for the list (`is:unresolved level:error`,
   `is:unresolved !browser.name:Edge`, …).
 - `period` — how recently an issue must have been seen to be listed.

@@ -2,22 +2,24 @@
  * Your Sentry issues, in prifly.
  *
  * "From a Sentry issue…", beside New session, lays out the unresolved issues
- * of the projects you mapped — new, escalating, regressed, ongoing — newest
- * or busiest first. The one you pick becomes a session in that project's
- * checkout that starts knowing the issue: counts, releases, tags, the latest
+ * of every project in your organization — new, escalating, regressed,
+ * ongoing — newest or busiest first. The one you pick becomes a session in
+ * that project's checkout, found through Sentry's code mappings
+ * (`checkout.ts`), that starts knowing the issue: counts, releases, tags, the latest
  * event's stack trace with your own frames in front, breadcrumbs, request —
  * and the whole latest event saved as JSON beside the prompt. The issue then
  * stays on that session's banner: click it to open it in Sentry, or use its
  * menu to resolve or archive it when the work is done.
  *
  * There is nothing to configure by hand. The first time you open the chooser
- * it offers the login, then your organizations, then your projects to map to
- * a checkout. See `setup.ts` for that, `auth.ts` for where the token comes
+ * it offers the login, then your organizations. See `setup.ts` for that,
+ * `auth.ts` for where the token comes
  * from, and `world.ts` for the small files this folder keeps.
  */
 
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { mainCheckout } from "./checkout";
 import { eventId } from "./event";
 import { COLUMNS, issueChip, issueFace, issueItem, launcherFlag } from "./issue-face";
 import { issuePrompt } from "./issue-prompt";
@@ -42,7 +44,7 @@ import {
 } from "./sentry";
 import { isSetupKey, runSetup, setupChoices, setupTail } from "./setup";
 import { shortDate } from "./time";
-import { creds, load, ready, reload, type World, writeState } from "./world";
+import { checkoutOf, creds, load, ready, reload, type World, writeState } from "./world";
 
 let world: World | null = null;
 
@@ -51,8 +53,8 @@ export async function activate(api: ExtensionApi): Promise<() => void> {
   let stopped = false;
   const tick = async () => {
     try {
-      // Nothing is asked of Sentry until the reader has logged in and mapped a
-      // project: an extension that is only enabled should sit quiet.
+      // Nothing is asked of Sentry until the reader has logged in and chosen
+      // an organization: an extension that is only enabled should sit quiet.
       if (ready(here())) {
         await reload(here());
         show();
@@ -104,15 +106,28 @@ export async function choices(
   if (setup !== null) return setup;
   if (at.loadedAt === 0) await reload(at);
   const words = query.trim().toLowerCase();
-  const several = Object.keys(at.config.projects).length > 1;
+  const projects = [...new Set(at.issues.map((issue) => issue.project))];
+  const notes = new Map(projects.map((project) => [project, folderNote(at, project)]));
+  const several = projects.length > 1;
   const now = Date.now();
   return {
     columns: COLUMNS,
     items: at.issues
       .filter((issue) => matches(issue, words))
-      .map((issue) => issueFace(issue, several, now, at.sparks.get(issue.id))),
+      .map((issue) =>
+        issueFace(issue, several, now, at.sparks.get(issue.id), notes.get(issue.project)),
+      ),
     actions: setupTail(at),
   };
+}
+
+/** Why a project's session will ask for its folder, or "" when the folder is found. */
+export function folderNote(at: World, project: string): string {
+  const { repo, folder } = checkoutOf(at, project);
+  if (folder !== "") return "";
+  return repo === ""
+    ? `no code mapping in Sentry for ${project}: you pick the folder`
+    : `${repo} is not checked out in ~, ~/src or ~/code: you pick the folder`;
 }
 
 /** Title, culprit, short id, level, project and assignee: what a person would search by. */
@@ -196,13 +211,21 @@ async function issueLaunch(at: World, key: string): Promise<Launch> {
     await Bun.write(saved, JSON.stringify(event, null, 2));
     files.push(saved);
   }
-  at.api.log("launch", { issue: issue.shortId, project: issue.project, event: event !== null });
-  const cwd = at.config.projects[issue.project];
+  const checkout = checkoutOf(at, issue.project);
+  at.api.log("launch", {
+    issue: issue.shortId,
+    project: issue.project,
+    event: event !== null,
+    repo: checkout.repo,
+    cwd: checkout.folder,
+  });
   const seeded: Launch = {
     prompt: issuePrompt({ issue, event, folder, files, now: Date.now() }),
     name: clip(issue.title, 60),
   };
-  if (cwd !== undefined) seeded.cwd = cwd;
+  // Found nowhere, the New session form asks, and `launched` remembers the answer.
+  if (checkout.folder !== "") seeded.cwd = checkout.folder;
+  else seeded.message = `${issue.shortId}: ${folderNote(at, issue.project)}.`;
   return seeded;
 }
 
@@ -214,12 +237,19 @@ export function safeName(name: string): string {
     .slice(0, 80);
 }
 
-/** The session that issue became: remembered, so the chip finds its row again. */
+/**
+ * The session that issue became: remembered, so the chip finds its row
+ * again — and the checkout it runs in remembered for the issue's project, so
+ * a folder the reader picked in the New session form is the next one's too.
+ */
 export async function launched(_launchId: string, key: string, sessionId: string): Promise<void> {
   const at = here();
   at.state.links[sessionId] = key;
+  const issue = at.issues.find((entry) => entry.id === key) ?? at.linked.get(key);
+  const cwd = at.api.sessions().find((session) => session.id === sessionId)?.cwd ?? "";
+  const top = cwd === "" ? "" : mainCheckout(cwd);
+  if (issue !== undefined && top !== "") at.state.folders[issue.project] = top;
   await writeState(at.api.folder, at.state);
-  const issue = at.issues.find((entry) => entry.id === key);
   if (issue !== undefined) at.linked.set(key, issue);
   show();
 }

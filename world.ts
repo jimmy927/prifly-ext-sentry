@@ -2,23 +2,27 @@
  * What this extension knows while it runs, and what it keeps between runs.
  *
  * Three small files sit next to this one, none of them in git: `config.json`
- * (the organization, which Sentry project is checked out where, and how the
- * list is sorted), `auth.json` (the reader's own token, when it was pasted
- * here — `auth.ts`), and `state.json` (which session was started from which
- * issue). Saved events go under `issues/`, also out of git.
+ * (the organization and how the list is sorted), `auth.json` (the reader's
+ * own token, when it was pasted here — `auth.ts`), and `state.json` (which
+ * session was started from which issue, and which folder each project's
+ * sessions were last started in). Saved events go under `issues/`, also out
+ * of git.
  */
 
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { type Clirc, findLogin, type Login, readClirc } from "./auth";
+import { type Checkout, checkoutFor } from "./checkout";
 import type { ExtensionApi, LaunchSpark } from "./prifly-api";
 import { obj, str } from "./read";
 import {
+  type CodeMapping,
   type Creds,
+  codeMappings,
   type Issue,
   issueDetail,
   issueStats,
-  projectIssues,
+  organizationIssues,
   SentryError,
   type Sort,
 } from "./sentry";
@@ -28,7 +32,10 @@ export type Config = {
   org: string;
   /** `https://sentry.io`, or a self-hosted Sentry's address. */
   baseUrl: string;
-  /** Sentry project slug → the checkout its sessions work in. */
+  /**
+   * Sentry project slug → a folder its sessions always start in. Optional and
+   * usually empty: the folder is found by itself (`checkout.ts`).
+   */
   projects: Record<string, string>;
   /** Sentry search syntax for the chooser: `is:unresolved` by default. */
   query: string;
@@ -41,8 +48,8 @@ export type Config = {
 export type State = {
   /** Which issue (by id) each session was started from. */
   links: Record<string, string>;
-  /** The reader asked to map another project; the chooser lists them until one is picked. */
-  addingProject: boolean;
+  /** Sentry project slug → the checkout its last session was started in. */
+  folders: Record<string, string>;
 };
 
 export type World = {
@@ -50,8 +57,10 @@ export type World = {
   config: Config;
   login: Login | null;
   state: State;
-  /** What the chooser lists: every mapped project's issues, newest or busiest first. */
+  /** What the chooser lists: the organization's issues, newest or busiest first. */
   issues: Issue[];
+  /** Sentry's code mappings, read with the issues; empty when the token may not read them. */
+  mappings: CodeMapping[];
   /** When the issues were last read; 0 for never, or for "read them again". */
   loadedAt: number;
   /** The issues on sessions' banners, by id, whatever their status now. */
@@ -70,7 +79,7 @@ export function expandHome(path: string, home: string): string {
 
 /**
  * config.json, read tolerantly: a missing or mistyped field takes its default,
- * and a project mapped to anything but a folder name is dropped.
+ * and a project pinned to anything but a folder name is dropped.
  */
 export function parseConfig(
   raw: unknown,
@@ -106,11 +115,16 @@ export function parseConfig(
 
 export function parseState(raw: unknown): State {
   const state = obj(raw);
-  const links: Record<string, string> = {};
-  for (const [session, issue] of Object.entries(obj(state["links"]))) {
-    if (typeof issue === "string" && issue !== "") links[session] = issue;
+  return { links: strings(state["links"]), folders: strings(state["folders"]) };
+}
+
+/** An object's non-empty string values, by key; anything else dropped. */
+function strings(raw: unknown): Record<string, string> {
+  const kept: Record<string, string> = {};
+  for (const [key, value] of Object.entries(obj(raw))) {
+    if (typeof value === "string" && value !== "") kept[key] = value;
   }
-  return { links, addingProject: state["addingProject"] === true };
+  return kept;
 }
 
 /** The token and the server, when there is a login. */
@@ -118,13 +132,33 @@ export function creds(world: World): Creds | null {
   return world.login === null ? null : { baseUrl: world.config.baseUrl, token: world.login.token };
 }
 
-/** Logged in, an organization chosen and a project mapped: everything else is setup. */
+/** Logged in and an organization chosen: everything else is setup. */
 export function ready(world: World): boolean {
-  return (
-    creds(world) !== null &&
-    world.config.org !== "" &&
-    Object.keys(world.config.projects).length > 0
-  );
+  return creds(world) !== null && world.config.org !== "";
+}
+
+/** Where a project's sessions start, from everything this machine and Sentry know now. */
+export function checkoutOf(world: World, project: string): Checkout {
+  return checkoutFor(project, world.mappings, {
+    pinned: world.config.projects,
+    remembered: world.state.folders,
+    sessionFolders: world.api.sessions().map((session) => session.cwd),
+  });
+}
+
+/**
+ * The code mappings, or none when Sentry will not give them: the folder is
+ * then found by the project's name or left to the New session form.
+ */
+async function mappingsOrNone(world: World, auth: Creds): Promise<CodeMapping[]> {
+  try {
+    return await codeMappings(auth, world.config.org);
+  } catch (caught) {
+    world.api.log("code_mappings_failed", {
+      message: caught instanceof Error ? caught.message : String(caught),
+    });
+    return [];
+  }
 }
 
 export async function load(api: ExtensionApi): Promise<World> {
@@ -135,13 +169,15 @@ export async function load(api: ExtensionApi): Promise<World> {
     login: await findLogin(api.folder, Bun.env, clirc),
     state: await readState(api.folder),
     issues: [],
+    mappings: [],
     loadedAt: 0,
     linked: new Map(),
     sparks: new Map(),
   };
 }
 
-const PER_PROJECT = 100;
+/** The most Sentry's issue list gives in one page. */
+const LIMIT = 100;
 
 /** The periods a card's bars cover, in the order the board's switch offers them. */
 export const SPARK_PERIODS = ["1h", "24h", "7d"] as const;
@@ -150,20 +186,21 @@ export const SPARK_PERIODS = ["1h", "24h", "7d"] as const;
 const STATS_BATCH = 25;
 
 /**
- * What Sentry has now: the chooser's issues for every mapped project, and the
- * issue behind each session's chip — read one by one, since a resolved issue
- * is not in the unresolved list but its chip should still say it is resolved.
+ * What Sentry has now: the chooser's issues across the organization, which
+ * repo each project's code is in, and the issue behind each session's chip —
+ * read one by one, since a resolved issue is not in the unresolved list but
+ * its chip should still say it is resolved.
  */
 export async function reload(world: World): Promise<void> {
   const auth = creds(world);
   if (auth === null || !ready(world)) return;
   const { org, query, period, sort } = world.config;
-  const lists = await Promise.all(
-    Object.keys(world.config.projects).map((project) =>
-      projectIssues(auth, org, project, { query, period, sort, limit: PER_PROJECT }),
-    ),
-  );
-  world.issues = sortIssues(lists.flat(), sort);
+  const [issues, mappings] = await Promise.all([
+    organizationIssues(auth, org, { query, period, sort, limit: LIMIT }),
+    mappingsOrNone(world, auth),
+  ]);
+  world.issues = sortIssues(issues, sort);
+  world.mappings = mappings;
   world.sparks = await sparksOf(world, auth, org);
   world.loadedAt = Date.now();
   const known = new Set(world.api.sessions().map((session) => session.id));

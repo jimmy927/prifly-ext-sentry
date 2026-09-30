@@ -2,17 +2,14 @@
  * Setting the extension up, in the place you go to pick an issue.
  *
  * There is no settings screen. Not logged in, the chooser lists the way to
- * log in; logged in with no organization chosen, it lists the organizations;
- * with no project mapped to a checkout, it lists the projects, and picking
- * one asks which folder it is checked out in. After that it lists the issues,
- * with a few rows kept beside them for changing any of it. Each setup row
+ * log in; logged in with no organization chosen, it lists the organizations.
+ * After that it lists the issues of every project in it, with a few rows kept
+ * beside them for changing any of it. There are no projects to map: where a
+ * project is checked out is found at launch (`checkout.ts`). Each setup row
  * starts nothing — it answers with an empty prompt — so the list simply comes
  * again, one step further on.
  */
 
-import { existsSync } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
 import {
   findLogin,
   forgetLogin,
@@ -23,17 +20,14 @@ import {
 } from "./auth";
 import { openBrowser } from "./open-browser";
 import type { Launch, LaunchChoice } from "./prifly-api";
-import { organizations, projects, whoami } from "./sentry";
-import { creds, expandHome, type World, writeConfig, writeState } from "./world";
+import { organizations, whoami } from "./sentry";
+import { creds, type World, writeConfig } from "./world";
 
 const KEYS = {
   open: "setup:open-token-page",
   token: "setup:paste-token",
   org: "setup:org:",
-  project: "setup:project:",
-  addProject: "setup:add-project",
   switchOrg: "setup:switch-org",
-  doneAdding: "setup:done-adding",
   sort: "setup:sort",
   logout: "setup:log-out",
 } as const;
@@ -42,13 +36,10 @@ export function isSetupKey(key: string): boolean {
   return key.startsWith("setup:");
 }
 
-/** The rows before any issue: the login, the organization, a project. Null once all are settled. */
+/** The rows before any issue: the login, then the organization. Null once both are settled. */
 export async function setupChoices(world: World): Promise<LaunchChoice[] | null> {
   if (world.login === null) return loginRows(world);
   if (world.config.org === "") return await orgRows(world);
-  if (Object.keys(world.config.projects).length === 0 || world.state.addingProject) {
-    return await projectRows(world);
-  }
   return null;
 }
 
@@ -56,9 +47,6 @@ const SORT_NAMES = { date: "last seen", new: "first seen", freq: "events", user:
 
 /** Kept beside the issues, for a reader who wants to change something. */
 export function setupTail(world: World): LaunchChoice[] {
-  const mapped = Object.entries(world.config.projects)
-    .map(([slug, folder]) => `${slug} → ${folder}`)
-    .join(", ");
   const next = world.config.sort === "freq" ? "last seen" : "events";
   return [
     {
@@ -66,13 +54,6 @@ export function setupTail(world: World): LaunchChoice[] {
       title: `Sort by ${next}`,
       group: "prifly",
       detail: `Now by ${SORT_NAMES[world.config.sort]}`,
-      tone: "muted",
-    },
-    {
-      key: KEYS.addProject,
-      title: "Map a project…",
-      group: "prifly",
-      detail: mapped,
       tone: "muted",
     },
     {
@@ -146,63 +127,11 @@ async function orgRows(world: World): Promise<LaunchChoice[]> {
   }));
 }
 
-/** Where a project is probably checked out: `~/<slug>`, `~/src/<slug>`, `~/code/<slug>`. */
-export function guessFolder(slug: string, home = homedir()): string {
-  const candidates = [join(home, slug), join(home, "src", slug), join(home, "code", slug)];
-  return candidates.find((folder) => existsSync(join(folder, ".git"))) ?? "";
-}
-
-async function projectRows(world: World): Promise<LaunchChoice[]> {
-  const auth = creds(world);
-  if (auth === null) return loginRows(world);
-  const found = await projects(auth, world.config.org);
-  if (found.length === 0)
-    throw new Error(`${world.config.org} has no projects this token can see.`);
-  const rows: LaunchChoice[] = found.map((project) => {
-    const mapped = world.config.projects[project.slug];
-    const guess = guessFolder(project.slug);
-    const detail =
-      mapped !== undefined
-        ? `Now ${mapped}`
-        : guess === ""
-          ? "Not mapped yet"
-          : `Probably ${guess}`;
-    return {
-      key: `${KEYS.project}${project.slug}`,
-      title: project.name,
-      group: "Map a Sentry project to its checkout",
-      detail,
-      tone: mapped === undefined ? "info" : "muted",
-      input: {
-        title: `Which folder is ${project.slug} checked out in?`,
-        placeholder: guess === "" ? "/home/you/src/project" : `${guess} (leave empty for this)`,
-      },
-    };
-  });
-  if (Object.keys(world.config.projects).length > 0) {
-    rows.push({
-      key: KEYS.doneAdding,
-      title: "Back to the issues",
-      group: "prifly",
-      tone: "muted",
-    });
-  }
-  return rows;
-}
-
 /** Carry out one of those rows. Null when the key is not one of them. */
 export async function runSetup(world: World, key: string, input: string): Promise<Launch | null> {
   if (key === KEYS.open) return await openTokenPage(world);
   if (key === KEYS.token) return await saveToken(world, input);
   if (key.startsWith(KEYS.org)) return await chooseOrg(world, key.slice(KEYS.org.length));
-  if (key.startsWith(KEYS.project)) {
-    return await mapProject(world, key.slice(KEYS.project.length), input);
-  }
-  if (key === KEYS.addProject || key === KEYS.doneAdding) {
-    world.state.addingProject = key === KEYS.addProject;
-    await writeState(world.api.folder, world.state);
-    return { prompt: "", message: "" };
-  }
   if (key === KEYS.sort) return await toggleSort(world);
   if (key === KEYS.switchOrg) return await switchOrg(world);
   if (key === KEYS.logout) return await logOut(world);
@@ -243,29 +172,15 @@ async function chooseOrg(world: World, slug: string): Promise<Launch> {
   world.config.org = slug;
   await writeConfig(world.api.folder, world.config);
   world.api.log("org_chosen", { org: slug });
-  return { prompt: "", message: `Showing ${slug}. Now map a project to its checkout.` };
+  return { prompt: "", message: `Showing every project in ${slug}.` };
 }
 
-async function mapProject(world: World, slug: string, input: string): Promise<Launch> {
-  const typed = input.trim().replace(/ \(leave empty for this\)$/, "");
-  const folder = typed === "" ? guessFolder(slug) : expandHome(typed, homedir());
-  if (folder === "") throw new Error(`Type the folder ${slug} is checked out in.`);
-  if (!existsSync(folder)) throw new Error(`There is no folder ${folder} on this machine.`);
-  world.config.projects[slug] = folder;
-  world.state.addingProject = false;
-  await Promise.all([
-    writeConfig(world.api.folder, world.config),
-    writeState(world.api.folder, world.state),
-  ]);
-  world.api.log("project_mapped", { project: slug, folder });
-  return { prompt: "", message: `${slug} issues start sessions in ${folder}.` };
-}
-
-/** Projects belong to an organization, so their mapping goes with it. */
+/** Projects belong to an organization, so any folder pinned to one goes with it. */
 async function switchOrg(world: World): Promise<Launch> {
   world.config.org = "";
   world.config.projects = {};
   world.issues = [];
+  world.mappings = [];
   world.loadedAt = 0;
   await writeConfig(world.api.folder, world.config);
   return { prompt: "", message: "" };

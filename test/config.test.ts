@@ -55,12 +55,15 @@ describe("parseConfig", () => {
 });
 
 describe("parseState", () => {
-  test("keeps only string links", () => {
-    expect(parseState({ links: { s1: "5001", s2: 7 }, addingProject: true })).toEqual({
-      links: { s1: "5001" },
-      addingProject: true,
-    });
-    expect(parseState(null)).toEqual({ links: {}, addingProject: false });
+  test("keeps only string links and folders", () => {
+    expect(
+      parseState({
+        links: { s1: "5001", s2: 7 },
+        folders: { odi: "/home/me/src/odi", web: "", bad: 3 },
+        addingProject: true,
+      }),
+    ).toEqual({ links: { s1: "5001" }, folders: { odi: "/home/me/src/odi" } });
+    expect(parseState(null)).toEqual({ links: {}, folders: {} });
   });
 });
 
