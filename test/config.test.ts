@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { looksLikeToken, parseClirc } from "../auth";
-import { matches } from "../index";
+import { alreadyStarted, matches } from "../index";
 import { columnOf, issueChip, issueFace, statusActions } from "../issue-face";
 import { readIssue, readNotes, shortRelease } from "../sentry";
 import { ago, when } from "../time";
@@ -119,6 +119,20 @@ describe("issues", () => {
     expect(shortRelease("shop@1.5.2")).toBe("shop@1.5.2");
   });
 
+  test("an issue that is already a session says which, and asks before another", () => {
+    const face = issueFace(issue, false, NOW);
+    expect(alreadyStarted(face, issue.shortId, [])).toBe(face);
+    const session = { id: "s1", title: "Fix the basket KeyError", cwd: "/w", state: "idle" };
+    const marked = alreadyStarted(face, issue.shortId, [session]);
+    expect(marked).toMatchObject({
+      key: "5001",
+      started: true,
+      detail: "SHOP-1A2 · Already a session: “Fix the basket KeyError”",
+      input: { placeholder: "again" },
+    });
+    expect(marked.input?.title).toContain("Type “again” to start another one anyway.");
+  });
+
   test("readNotes gives the notes only, oldest first", () => {
     expect(readNotes(rawIssue).map((note) => note.text)).toEqual(["first!", "seen after deploy"]);
   });
@@ -145,6 +159,10 @@ describe("issues", () => {
     expect(barred.sparks).toEqual([spark]);
     expect(barred.detail).toBe("SHOP-1A2 · 3 users · 1h ago");
     expect(face.sub).toBe("");
+    // A card with no folder found says so after the rest.
+    expect(issueFace(issue, false, NOW, [], "no code mapping").detail).toBe(
+      "SHOP-1A2 · /api/checkout · 84 events · 3 users · 1h ago · no code mapping",
+    );
     const chip = issueChip(issue, NOW);
     expect(chip.label).toBe("SHOP-1A2: KeyError: 'basket'");
     expect(chip.url).toBe(issue.permalink);

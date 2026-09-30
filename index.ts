@@ -26,6 +26,7 @@ import { issuePrompt } from "./issue-prompt";
 import type {
   Decoration,
   ExtensionApi,
+  ExtensionSession,
   Launch,
   LaunchBoard,
   LaunchChoice,
@@ -115,9 +116,45 @@ export async function choices(
     items: at.issues
       .filter((issue) => matches(issue, words))
       .map((issue) =>
-        issueFace(issue, several, now, at.sparks.get(issue.id), notes.get(issue.project)),
+        alreadyStarted(
+          issueFace(issue, several, now, at.sparks.get(issue.id), notes.get(issue.project)),
+          issue.shortId,
+          sessionsOf(at, issue.id),
+        ),
       ),
     actions: setupTail(at),
+  };
+}
+
+/** The sessions on this machine that were started from this issue. */
+function sessionsOf(at: World, issueId: string): ExtensionSession[] {
+  return at.api.sessions().filter((session) => at.state.links[session.id] === issueId);
+}
+
+/**
+ * An issue that has already become a session, marked as one.
+ *
+ * Nearly always an issue is worked on once: a second pick is a slip, and two
+ * sessions would then chase the same error without knowing of each other. So
+ * the card is tinted and says which session it is — prifly puts a chip on it
+ * that opens that session — and picking it asks first: typing anything into
+ * that row starts another session anyway, for the times that is wanted.
+ */
+export function alreadyStarted(
+  face: LaunchChoice,
+  shortId: string,
+  sessions: ExtensionSession[],
+): LaunchChoice {
+  if (sessions.length === 0) return face;
+  const names = sessions.map((session) => `“${clip(session.title, 50)}”`).join(", ");
+  return {
+    ...face,
+    started: true,
+    detail: `${shortId} · Already a session: ${names}`,
+    input: {
+      title: `Already a session: ${names}. Type “again” to start another one anyway.`,
+      placeholder: "again",
+    },
   };
 }
 
@@ -171,7 +208,12 @@ function noEvent(caught: unknown): null {
 }
 
 /** The issue as a session's first prompt, its latest event on disk — or a setup step taken. */
-export async function launch(_launchId: string, key: string, input: string): Promise<Launch> {
+export async function launch(
+  _launchId: string,
+  key: string,
+  input: string,
+  how?: { again: boolean },
+): Promise<Launch> {
   const at = here();
   if (isSetupKey(key)) {
     const done = await runSetup(at, key, input);
@@ -185,6 +227,18 @@ export async function launch(_launchId: string, key: string, input: string): Pro
       }
       return done;
     }
+  }
+  // Nothing typed means the issue was picked without being asked — the Start
+  // button of an issue opened for reading. One that is already a session is
+  // started again only when the reader answered the row that asks, or chose
+  // "New session from this card…" on one of its sessions.
+  const already = sessionsOf(at, key);
+  if (already.length > 0 && input === "" && how?.again !== true) {
+    const issue = at.issues.find((entry) => entry.id === key) ?? at.linked.get(key);
+    return {
+      prompt: "",
+      message: `${issue?.shortId ?? "This issue"} is already a session: “${already[0]?.title ?? ""}” — open it from the chip on its card. Pick the issue on the board and type “again” to start another one anyway.`,
+    };
   }
   return await issueLaunch(at, key);
 }
