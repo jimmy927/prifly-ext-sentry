@@ -23,6 +23,7 @@ import { mainCheckout } from "./checkout";
 import { eventId } from "./event";
 import { COLUMNS, issueChip, issueFace, issueItem, launcherFlag } from "./issue-face";
 import { issuePrompt } from "./issue-prompt";
+import { LINK_PREFIX, linkActions, withLinks } from "./link-actions";
 import type {
   Decoration,
   ExtensionApi,
@@ -116,14 +117,26 @@ export async function choices(
     items: at.issues
       .filter((issue) => matches(issue, words))
       .map((issue) =>
-        alreadyStarted(
-          issueFace(issue, several, now, at.sparks.get(issue.id), notes.get(issue.project)),
-          issue.shortId,
-          sessionsOf(at, issue.id),
+        linkable(
+          alreadyStarted(
+            issueFace(issue, several, now, at.sparks.get(issue.id), notes.get(issue.project)),
+            issue.shortId,
+            sessionsOf(at, issue.id),
+          ),
+          at,
         ),
       ),
     actions: setupTail(at),
   };
+}
+
+/**
+ * An issue that already has a session can be linked to it: the menu offers
+ * the recent ones, just before the destructive "Archive until it escalates".
+ */
+function linkable(face: LaunchChoice, at: World): LaunchChoice {
+  const links = linkActions(at.api.sessions(), at.state.links, face.key);
+  return links.length === 0 ? face : { ...face, actions: withLinks(face.actions ?? [], links) };
 }
 
 /** The sessions on this machine that were started from this issue. */
@@ -320,6 +333,8 @@ const CHANGES: Record<string, { status: StatusChange; said: string }> = {
  */
 export async function action(key: string, actionId: string): Promise<string> {
   const at = here();
+  if (actionId.startsWith(LINK_PREFIX))
+    return await link(at, key, actionId.slice(LINK_PREFIX.length));
   const auth = needCreds(at);
   const change = CHANGES[actionId];
   if (change === undefined) throw new Error(`Nothing to do for ${actionId}`);
@@ -329,6 +344,21 @@ export async function action(key: string, actionId: string): Promise<string> {
   await reload(at);
   show();
   return `${change.said} ${issue?.shortId ?? key}${issue === undefined ? "" : ` “${clip(issue.title, 60)}”`}.`;
+}
+
+/**
+ * A session that was not started from the issue, given its chip anyway.
+ * Keyed by session, so a session on another issue moves to this one.
+ */
+async function link(at: World, key: string, sessionId: string): Promise<string> {
+  at.state.links[sessionId] = key;
+  await writeState(at.api.folder, at.state);
+  const issue = at.issues.find((entry) => entry.id === key) ?? at.linked.get(key);
+  if (issue !== undefined) at.linked.set(key, issue);
+  show();
+  at.api.log("linked", { issue: key, session: sessionId.slice(0, 8) });
+  const title = at.api.sessions().find((session) => session.id === sessionId)?.title;
+  return `Linked ${issue?.shortId ?? key} to ${title ?? sessionId.slice(0, 8)}.`;
 }
 
 function here(): World {
