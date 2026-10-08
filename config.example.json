@@ -5,5 +5,6 @@
   "query": "is:unresolved",
   "period": "14d",
   "sort": "date",
-  "refreshSeconds": 120
+  "refreshSeconds": 120,
+  "startSessions": { "enabled": false, "levels": ["fatal", "error"], "maxPerDay": 10 }
 }

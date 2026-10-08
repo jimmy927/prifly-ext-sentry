@@ -114,7 +114,8 @@ Written by the setup rows; edit it by hand if you like
   "query": "is:unresolved",
   "period": "14d",
   "sort": "date",
-  "refreshSeconds": 120
+  "refreshSeconds": 120,
+  "startSessions": { "enabled": false, "levels": ["fatal", "error"], "maxPerDay": 10 }
 }
 ```
 
@@ -127,9 +128,35 @@ Written by the setup rows; edit it by hand if you like
 - `sort` — `date` (last seen), `new` (first seen), `freq` (events) or `user`
   (users affected).
 - `baseUrl` — for a self-hosted Sentry.
+- `startSessions` — see below; off unless you turn it on.
 
 `config.json`, `auth.json`, `state.json` and the saved `issues/` are all ignored
 by git: nothing about your account or your errors is ever committed.
+
+## Starting sessions by itself
+
+With `startSessions` turned on, each new error nobody works on becomes a
+session without a click:
+
+```json
+"startSessions": { "enabled": true, "levels": ["fatal", "error"], "maxPerDay": 10 }
+```
+
+On every refresh, each open issue whose level is in `levels` and that no
+session carries yet is started, oldest first seen first, at most three a
+refresh and `maxPerDay` in any 24 hours. Each issue is asked for once a day,
+whatever prifly answers, so one it refused is not asked for again on every
+refresh. prifly has caps of its own on top: at most 3 of these sessions
+still working at once, and 12 started an hour.
+
+The session starts as Research: it investigates and proposes, and changes
+nothing until you say Act. Its row is tinted in the sidebar until you open
+it, and the Sentry issue is on its banner as with any other start. Starting
+by itself needs a prifly with `api.start` (its `start-session` feature); an
+older one leaves the launcher glowing as before and starts nothing.
+
+An issue whose project has no folder found (no code mapping, no checkout)
+is not started: the New session form would have asked for the folder.
 
 ## What it brings
 

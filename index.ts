@@ -19,6 +19,7 @@
 
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { issuesToStart, recentAttempts, starter } from "./auto-start";
 import { mainCheckout } from "./checkout";
 import { eventId } from "./event";
 import { COLUMNS, issueChip, issueFace, issueItem, launcherFlag } from "./issue-face";
@@ -34,6 +35,7 @@ import type {
   LaunchBoard,
   LaunchChoice,
   LaunchItem,
+  StartAnswer,
 } from "./prifly-api";
 import { clip } from "./read";
 import {
@@ -72,6 +74,7 @@ export async function activate(api: ExtensionApi): Promise<() => void> {
       if (ready(here())) {
         await reload(here());
         show();
+        await startNew(here(), Date.now());
       }
     } catch (caught) {
       // Sentry down, a revoked token, no network: said in the log and tried
@@ -108,12 +111,54 @@ function show(): void {
     if (chips.length > 0) bySession[sessionId] = chips;
   }
   at.api.show(bySession, []);
-  const worked = new Set(
+  at.api.flag?.("issue", launcherFlag(at.issues, workedIssues(at)));
+}
+
+/** The issues on a session this machine still has. */
+function workedIssues(at: World): Set<string> {
+  const known = new Set(at.api.sessions().map((session) => session.id));
+  return new Set(
     Object.entries(at.state.links).flatMap(([sessionId, issueIds]) =>
       known.has(sessionId) ? issueIds : [],
     ),
   );
-  at.api.flag?.("issue", launcherFlag(at.issues, worked));
+}
+
+/**
+ * New errors nobody works on, each made a session by itself — when the reader
+ * turned that on and this prifly can (`auto-start.ts`). Every try is kept,
+ * started or not, so an issue is asked for once a day, not on every poll.
+ * prifly calls `launched` for a session it starts, which links the issue.
+ */
+export async function startNew(at: World, now: number): Promise<void> {
+  const start = starter(at.api);
+  if (start === undefined || !at.config.startSessions.enabled) return;
+  at.state.attempted = recentAttempts(at.state.attempted, now);
+  const due = issuesToStart(
+    at.issues,
+    workedIssues(at),
+    at.state.attempted,
+    at.config.startSessions,
+    now,
+  );
+  for (const issue of due) {
+    // Kept before asking, so a poll that overlaps this one does not ask again.
+    at.state.attempted[issue.id] = { at: now, started: false };
+    let answer: StartAnswer;
+    try {
+      answer = await start("issue", issue.id);
+    } catch (caught) {
+      answer = { started: false, reason: message(caught) };
+    }
+    at.state.attempted[issue.id] = { at: now, started: answer.started };
+    at.api.log("auto_start", {
+      issue: issue.shortId,
+      started: answer.started,
+      session: answer.started ? answer.sessionId.slice(0, 8) : null,
+      reason: answer.started ? null : answer.reason,
+    });
+  }
+  if (due.length > 0) await writeState(at.api.folder, at.state);
 }
 
 /**

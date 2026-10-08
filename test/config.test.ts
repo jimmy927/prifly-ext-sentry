@@ -4,7 +4,15 @@ import { alreadyStarted, matches } from "../index";
 import { columnOf, issueChip, issueFace, statusActions } from "../issue-face";
 import { readIssue, readNotes, shortRelease } from "../sentry";
 import { ago, when } from "../time";
-import { expandHome, linkIssue, parseConfig, parseState, sortIssues, unlinkIssue } from "../world";
+import {
+  expandHome,
+  linkIssue,
+  parseConfig,
+  parseState,
+  type State,
+  sortIssues,
+  unlinkIssue,
+} from "../world";
 import { NOW, rawIssue } from "./fixtures";
 
 const noClirc = { token: "", org: "", url: "" };
@@ -19,6 +27,7 @@ describe("parseConfig", () => {
       period: "14d",
       sort: "date",
       refreshSeconds: 120,
+      startSessions: { enabled: false, levels: ["fatal", "error"], maxPerDay: 10 },
     });
   });
 
@@ -62,8 +71,18 @@ describe("parseState", () => {
         folders: { odi: "/home/me/src/odi", web: "", bad: 3 },
         addingProject: true,
       }),
-    ).toEqual({ links: { s1: ["5001", "5002"] }, folders: { odi: "/home/me/src/odi" } });
-    expect(parseState(null)).toEqual({ links: {}, folders: {} });
+    ).toEqual({
+      links: { s1: ["5001", "5002"] },
+      folders: { odi: "/home/me/src/odi" },
+      attempted: {},
+    });
+    expect(parseState(null)).toEqual({ links: {}, folders: {}, attempted: {} });
+  });
+
+  test("keeps only timed tries at starting a session", () => {
+    expect(
+      parseState({ attempted: { a: { at: 5, started: true }, b: { at: "x" }, c: 3 } }).attempted,
+    ).toEqual({ a: { at: 5, started: true } });
   });
 
   test("reads a one-issue link from an older state.json as a list of one", () => {
@@ -73,17 +92,14 @@ describe("parseState", () => {
 
 describe("linkIssue and unlinkIssue", () => {
   test("a second issue joins the first instead of replacing it", () => {
-    const state = { links: { s1: ["5001"] }, folders: {} };
+    const state = { links: { s1: ["5001"] }, folders: {}, attempted: {} };
     linkIssue(state, "s1", "5002");
     linkIssue(state, "s1", "5002");
     expect(state.links).toEqual({ s1: ["5001", "5002"] });
   });
 
   test("unlinking the last issue forgets the session", () => {
-    const state: { links: Record<string, string[]>; folders: Record<string, string> } = {
-      links: { s1: ["5001", "5002"] },
-      folders: {},
-    };
+    const state: State = { links: { s1: ["5001", "5002"] }, folders: {}, attempted: {} };
     unlinkIssue(state, "s1", "5001");
     expect(state.links).toEqual({ s1: ["5002"] });
     unlinkIssue(state, "s1", "5002");

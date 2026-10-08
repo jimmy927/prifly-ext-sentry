@@ -231,10 +231,18 @@ export type Launch = {
   images?: { mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp"; data: string }[];
 };
 
+/** How `api.start` went: the session it made, or why none was. */
+export type StartAnswer = { started: true; sessionId: string } | { started: false; reason: string };
+
 /** A session the host knows, for an extension to match its things against. */
 export type ExtensionSession = { id: string; title: string; cwd: string; state: string };
 
 export type ExtensionApi = {
+  /**
+   * What this prifly accepts beyond the first version, by name — "start-session"
+   * among them where `start` exists. Absent on a prifly that predates the list.
+   */
+  features?: readonly string[];
   /**
    * Replace everything this extension shows. `bySession` is keyed by a
    * session id or any unique start of one (a label has room for 8 characters);
@@ -255,6 +263,16 @@ export type ExtensionApi = {
   onAction(
     handler: (key: string, action: string, picked?: ActionPicked) => Promise<string> | string,
   ): void;
+  /**
+   * Start a session from one of this extension's launcher items by itself,
+   * exactly as pressing Start on it would: `launch()` gives the prompt and
+   * folder, the first message goes as Research, and `launched` is told which
+   * session it became. Only for a launcher whose manifest entry says
+   * `"starts": true`, and under prifly's caps: three of this extension's
+   * starts running at once, twelve an hour. Only where `features` includes
+   * "start-session".
+   */
+  start?(launchId: string, key: string): Promise<StartAnswer>;
   /** The sessions on this machine the host knows now. */
   sessions(): ExtensionSession[];
   /** A line in the host's log, under `ext.<id>.<event>`. */

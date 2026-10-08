@@ -12,6 +12,7 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { type Clirc, findLogin, type Login, readClirc } from "./auth";
+import { type Attempt, parseStartSessions, type StartSessions } from "./auto-start";
 import { type Checkout, checkoutFor } from "./checkout";
 import type { ExtensionApi, LaunchSpark } from "./prifly-api";
 import { obj, str } from "./read";
@@ -43,6 +44,8 @@ export type Config = {
   period: string;
   sort: Sort;
   refreshSeconds: number;
+  /** Whether new errors start a session by themselves (`auto-start.ts`); off by default. */
+  startSessions: StartSessions;
 };
 
 export type State = {
@@ -50,6 +53,8 @@ export type State = {
   links: Record<string, string[]>;
   /** Sentry project slug → the checkout its last session was started in. */
   folders: Record<string, string>;
+  /** Issue id → the last try at starting a session from it by itself, kept a day. */
+  attempted: Record<string, Attempt>;
 };
 
 export type World = {
@@ -110,12 +115,30 @@ export function parseConfig(
     period: str(config["period"]) || "14d",
     sort,
     refreshSeconds: Math.max(30, refresh),
+    startSessions: parseStartSessions(config["startSessions"]),
   };
 }
 
 export function parseState(raw: unknown): State {
   const state = obj(raw);
-  return { links: issueLists(state["links"]), folders: strings(state["folders"]) };
+  return {
+    links: issueLists(state["links"]),
+    folders: strings(state["folders"]),
+    attempted: attempts(state["attempted"]),
+  };
+}
+
+/** The tries at starting a session by itself, each with a time; anything else dropped. */
+function attempts(raw: unknown): Record<string, Attempt> {
+  const kept: Record<string, Attempt> = {};
+  for (const [issueId, value] of Object.entries(obj(raw))) {
+    const attempt = obj(value);
+    const at = attempt["at"];
+    if (issueId !== "" && typeof at === "number" && Number.isFinite(at)) {
+      kept[issueId] = { at, started: attempt["started"] === true };
+    }
+  }
+  return kept;
 }
 
 /**

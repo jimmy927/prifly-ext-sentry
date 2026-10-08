@@ -11,7 +11,8 @@
       "label": "From a Sentry issue…",
       "icon": "sentry",
       "description": "Your unresolved issues, newest or most frequent first, across every project of your organization, once you have logged in and chosen it: both happen here. Each session starts in the project's checkout, found through Sentry's code mappings. The session starts knowing the issue: counts, releases, tags, the latest event's stack trace, breadcrumbs and request.",
-      "searchPlaceholder": "Filter by title, culprit, short id, level or project…"
+      "searchPlaceholder": "Filter by title, culprit, short id, level or project…",
+      "starts": true
     }
   ]
 }
