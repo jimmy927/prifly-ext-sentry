@@ -4,7 +4,7 @@ import { alreadyStarted, matches } from "../index";
 import { columnOf, issueChip, issueFace, statusActions } from "../issue-face";
 import { readIssue, readNotes, shortRelease } from "../sentry";
 import { ago, when } from "../time";
-import { expandHome, parseConfig, parseState, sortIssues } from "../world";
+import { expandHome, linkIssue, parseConfig, parseState, sortIssues, unlinkIssue } from "../world";
 import { NOW, rawIssue } from "./fixtures";
 
 const noClirc = { token: "", org: "", url: "" };
@@ -58,12 +58,36 @@ describe("parseState", () => {
   test("keeps only string links and folders", () => {
     expect(
       parseState({
-        links: { s1: "5001", s2: 7 },
+        links: { s1: ["5001", 7, "5002", "5001"], s2: 7, s3: [] },
         folders: { odi: "/home/me/src/odi", web: "", bad: 3 },
         addingProject: true,
       }),
-    ).toEqual({ links: { s1: "5001" }, folders: { odi: "/home/me/src/odi" } });
+    ).toEqual({ links: { s1: ["5001", "5002"] }, folders: { odi: "/home/me/src/odi" } });
     expect(parseState(null)).toEqual({ links: {}, folders: {} });
+  });
+
+  test("reads a one-issue link from an older state.json as a list of one", () => {
+    expect(parseState({ links: { s1: "5001" } }).links).toEqual({ s1: ["5001"] });
+  });
+});
+
+describe("linkIssue and unlinkIssue", () => {
+  test("a second issue joins the first instead of replacing it", () => {
+    const state = { links: { s1: ["5001"] }, folders: {} };
+    linkIssue(state, "s1", "5002");
+    linkIssue(state, "s1", "5002");
+    expect(state.links).toEqual({ s1: ["5001", "5002"] });
+  });
+
+  test("unlinking the last issue forgets the session", () => {
+    const state: { links: Record<string, string[]>; folders: Record<string, string> } = {
+      links: { s1: ["5001", "5002"] },
+      folders: {},
+    };
+    unlinkIssue(state, "s1", "5001");
+    expect(state.links).toEqual({ s1: ["5002"] });
+    unlinkIssue(state, "s1", "5002");
+    expect(state.links).toEqual({});
   });
 });
 

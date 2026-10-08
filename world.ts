@@ -46,8 +46,8 @@ export type Config = {
 };
 
 export type State = {
-  /** Which issue (by id) each session was started from. */
-  links: Record<string, string>;
+  /** The issues (by id) each session was started from or linked to, oldest first. */
+  links: Record<string, string[]>;
   /** Sentry project slug → the checkout its last session was started in. */
   folders: Record<string, string>;
 };
@@ -115,7 +115,35 @@ export function parseConfig(
 
 export function parseState(raw: unknown): State {
   const state = obj(raw);
-  return { links: strings(state["links"]), folders: strings(state["folders"]) };
+  return { links: issueLists(state["links"]), folders: strings(state["folders"]) };
+}
+
+/**
+ * Each session's issue ids. A `state.json` from before a session could carry
+ * several issues holds one id as a string; it is read as a list of one.
+ */
+function issueLists(raw: unknown): Record<string, string[]> {
+  const kept: Record<string, string[]> = {};
+  for (const [session, value] of Object.entries(obj(raw))) {
+    const ids = (Array.isArray(value) ? value : [value]).filter(
+      (id): id is string => typeof id === "string" && id !== "",
+    );
+    if (ids.length > 0) kept[session] = [...new Set(ids)];
+  }
+  return kept;
+}
+
+/** The issue added to the session's, once; the ones it already carries stay. */
+export function linkIssue(state: State, sessionId: string, issueId: string): void {
+  const ids = state.links[sessionId] ?? [];
+  if (!ids.includes(issueId)) state.links[sessionId] = [...ids, issueId];
+}
+
+/** The issue taken off the session; a session left with none is forgotten. */
+export function unlinkIssue(state: State, sessionId: string, issueId: string): void {
+  const ids = (state.links[sessionId] ?? []).filter((id) => id !== issueId);
+  if (ids.length === 0) delete state.links[sessionId];
+  else state.links[sessionId] = ids;
 }
 
 /** An object's non-empty string values, by key; anything else dropped. */
@@ -207,7 +235,7 @@ export async function reload(world: World): Promise<void> {
   const wanted = new Set(
     Object.entries(world.state.links)
       .filter(([session]) => known.has(session))
-      .map(([, issue]) => issue),
+      .flatMap(([, issues]) => issues),
   );
   const linked = new Map<string, Issue>();
   for (const id of wanted) {

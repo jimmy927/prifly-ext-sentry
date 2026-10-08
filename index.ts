@@ -27,6 +27,7 @@ import { LINK_ACTION, withLink } from "./link-actions";
 import type {
   ActionPicked,
   Decoration,
+  DecorationAction,
   ExtensionApi,
   ExtensionSession,
   Launch,
@@ -47,7 +48,17 @@ import {
 } from "./sentry";
 import { isSetupKey, runSetup, setupChoices, setupTail } from "./setup";
 import { shortDate } from "./time";
-import { checkoutOf, creds, load, ready, reload, type World, writeState } from "./world";
+import {
+  checkoutOf,
+  creds,
+  linkIssue,
+  load,
+  ready,
+  reload,
+  unlinkIssue,
+  type World,
+  writeState,
+} from "./world";
 
 let world: World | null = null;
 
@@ -79,17 +90,22 @@ export async function activate(api: ExtensionApi): Promise<() => void> {
   };
 }
 
-/** The chips: one issue on the session that was started from it. */
+/** The chips: one per issue the session was started from or linked to. */
 function show(): void {
   const at = here();
   const bySession: Record<string, Decoration[]> = {};
   const known = new Set(at.api.sessions().map((session) => session.id));
   const now = Date.now();
-  for (const [sessionId, issueId] of Object.entries(at.state.links)) {
-    const issue = at.linked.get(issueId);
-    // A deleted issue stops being drawn; the link stays in case it was a blip.
-    if (issue === undefined || !known.has(sessionId)) continue;
-    bySession[sessionId] = [issueChip(issue, now)];
+  for (const [sessionId, issueIds] of Object.entries(at.state.links)) {
+    if (!known.has(sessionId)) continue;
+    const chips = issueIds.flatMap((issueId) => {
+      const issue = at.linked.get(issueId);
+      // A deleted issue stops being drawn; the link stays in case it was a blip.
+      if (issue === undefined) return [];
+      const chip = issueChip(issue, now);
+      return [{ ...chip, actions: [...(chip.actions ?? []), unlinkAction(sessionId)] }];
+    });
+    if (chips.length > 0) bySession[sessionId] = chips;
   }
   at.api.show(bySession, []);
   at.api.flag?.("issue", launcherFlag(at.issues));
@@ -141,7 +157,9 @@ function linkable(face: LaunchChoice): LaunchChoice {
 
 /** The sessions on this machine that were started from this issue. */
 function sessionsOf(at: World, issueId: string): ExtensionSession[] {
-  return at.api.sessions().filter((session) => at.state.links[session.id] === issueId);
+  return at.api
+    .sessions()
+    .filter((session) => at.state.links[session.id]?.includes(issueId) === true);
 }
 
 /**
@@ -311,7 +329,7 @@ export function safeName(name: string): string {
  */
 export async function launched(_launchId: string, key: string, sessionId: string): Promise<void> {
   const at = here();
-  at.state.links[sessionId] = key;
+  linkIssue(at.state, sessionId, key);
   const issue = at.issues.find((entry) => entry.id === key) ?? at.linked.get(key);
   const cwd = at.api.sessions().find((session) => session.id === sessionId)?.cwd ?? "";
   const top = cwd === "" ? "" : mainCheckout(cwd);
@@ -342,6 +360,8 @@ export async function action(
     if (picked === undefined) throw new Error("This prifly cannot pick a session yet: update it.");
     return await link(at, key, picked.sessionId);
   }
+  if (actionId.startsWith(UNLINK_PREFIX))
+    return await unlink(at, key, actionId.slice(UNLINK_PREFIX.length));
   const auth = needCreds(at);
   const change = CHANGES[actionId];
   if (change === undefined) throw new Error(`Nothing to do for ${actionId}`);
@@ -354,11 +374,12 @@ export async function action(
 }
 
 /**
- * A session that was not started from the issue, given its chip anyway.
- * Keyed by session, so a session on another issue moves to this one.
+ * A session that was not started from the issue, given its chip anyway —
+ * beside the chips it already has: one session often chases errors that
+ * share a cause, like a failed backup step and the failed upload behind it.
  */
 async function link(at: World, key: string, sessionId: string): Promise<string> {
-  at.state.links[sessionId] = key;
+  linkIssue(at.state, sessionId, key);
   await writeState(at.api.folder, at.state);
   const issue = at.issues.find((entry) => entry.id === key) ?? at.linked.get(key);
   if (issue !== undefined) at.linked.set(key, issue);
@@ -366,6 +387,24 @@ async function link(at: World, key: string, sessionId: string): Promise<string> 
   at.api.log("linked", { issue: key, session: sessionId.slice(0, 8) });
   const title = at.api.sessions().find((session) => session.id === sessionId)?.title;
   return `Linked ${issue?.shortId ?? key} to ${title ?? sessionId.slice(0, 8)}.`;
+}
+
+/** The chip's menu id prefix for taking it off its session; the full session id follows. */
+const UNLINK_PREFIX = "unlink:";
+
+function unlinkAction(sessionId: string): DecorationAction {
+  return { id: `${UNLINK_PREFIX}${sessionId}`, label: "Unlink from this session" };
+}
+
+/** A link made by mistake, undone from the chip: the issue itself is left alone in Sentry. */
+async function unlink(at: World, key: string, sessionId: string): Promise<string> {
+  unlinkIssue(at.state, sessionId, key);
+  await writeState(at.api.folder, at.state);
+  show();
+  at.api.log("unlinked", { issue: key, session: sessionId.slice(0, 8) });
+  const issue = at.linked.get(key) ?? at.issues.find((entry) => entry.id === key);
+  const title = at.api.sessions().find((session) => session.id === sessionId)?.title;
+  return `Unlinked ${issue?.shortId ?? key} from ${title ?? sessionId.slice(0, 8)}.`;
 }
 
 function here(): World {
