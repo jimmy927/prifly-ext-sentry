@@ -8,7 +8,7 @@
  * (its caps, no folder for the project) is not asked for again every poll.
  */
 
-import type { ExtensionApi, StartAnswer } from "./prifly-api";
+import type { ExtensionApi, SettingValue, StartAnswer } from "./prifly-api";
 import { obj } from "./read";
 import type { Issue } from "./sentry";
 
@@ -50,6 +50,23 @@ export function parseStartSessions(raw: unknown): StartSessions {
         ? Math.floor(max)
         : DEFAULT_START_SESSIONS.maxPerDay,
   };
+}
+
+/**
+ * The same, from the settings the Extensions page keeps (`prifly-extension.json`
+ * declares them): `startSessions`, `startLevels`, `startMaxPerDay`.
+ */
+export function startSessionsFrom(values: Readonly<Record<string, SettingValue>>): StartSessions {
+  return parseStartSessions({
+    enabled: values["startSessions"],
+    levels: values["startLevels"],
+    maxPerDay: values["startMaxPerDay"],
+  });
+}
+
+/** Whether this prifly keeps the settings, so they come from it rather than config.json. */
+export function hasSettings(api: ExtensionApi): boolean {
+  return (api.features ?? []).includes("settings") && api.settings !== undefined;
 }
 
 /** The attempts of the last day; older ones are forgotten. */

@@ -135,8 +135,11 @@ by git: nothing about your account or your errors is ever committed.
 
 ## Starting sessions by itself
 
-With `startSessions` turned on, each new error nobody works on becomes a
-session without a click:
+With it turned on, each new error nobody works on becomes a session without
+a click. Turn it on in prifly's Extensions page: unfold "Sentry issues" and
+tick **Start sessions by itself**, with the **Levels** that count and the
+**Most per day**. A prifly without extension settings reads the same from
+`config.json` instead:
 
 ```json
 "startSessions": { "enabled": true, "levels": ["fatal", "error"], "maxPerDay": 10 }

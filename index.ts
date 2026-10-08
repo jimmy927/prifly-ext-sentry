@@ -19,7 +19,13 @@
 
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { issuesToStart, recentAttempts, starter } from "./auto-start";
+import {
+  hasSettings,
+  issuesToStart,
+  recentAttempts,
+  starter,
+  startSessionsFrom,
+} from "./auto-start";
 import { mainCheckout } from "./checkout";
 import { eventId } from "./event";
 import { COLUMNS, issueChip, issueFace, issueItem, launcherFlag } from "./issue-face";
@@ -66,6 +72,16 @@ let world: World | null = null;
 
 export async function activate(api: ExtensionApi): Promise<() => void> {
   world = await load(api);
+  // Where prifly keeps settings, the Extensions page decides; config.json's
+  // `startSessions` is for an older prifly.
+  if (hasSettings(api) && api.settings !== undefined) {
+    world.config.startSessions = startSessionsFrom(api.settings);
+    api.onSettings?.((values) => {
+      if (world === null) return;
+      world.config.startSessions = startSessionsFrom(values);
+      api.log("settings", { startSessions: world.config.startSessions.enabled });
+    });
+  }
   let stopped = false;
   const tick = async () => {
     try {

@@ -231,6 +231,9 @@ export type Launch = {
   images?: { mediaType: "image/png" | "image/jpeg" | "image/gif" | "image/webp"; data: string }[];
 };
 
+/** A setting's value: a boolean, number, string, or the ticked options of a "choices" field. */
+export type SettingValue = boolean | number | string | string[];
+
 /** How `api.start` went: the session it made, or why none was. */
 export type StartAnswer = { started: true; sessionId: string } | { started: false; reason: string };
 
@@ -273,6 +276,14 @@ export type ExtensionApi = {
    * "start-session".
    */
   start?(launchId: string, key: string): Promise<StartAnswer>;
+  /**
+   * The values of the settings the manifest declares under `settings`, as
+   * the reader set them on the Extensions page, defaults filled in. Only
+   * where `features` includes "settings".
+   */
+  settings?: Readonly<Record<string, SettingValue>>;
+  /** Called with every value after the reader changes one. One handler; a second call replaces it. */
+  onSettings?(handler: (values: Readonly<Record<string, SettingValue>>) => void): void;
   /** The sessions on this machine the host knows now. */
   sessions(): ExtensionSession[];
   /** A line in the host's log, under `ext.<id>.<event>`. */

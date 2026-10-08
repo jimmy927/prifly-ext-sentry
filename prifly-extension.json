@@ -5,6 +5,34 @@
   "version": "0.1.0",
   "main": "index.ts",
   "prompt": "prompt.md",
+  "settings": [
+    {
+      "id": "startSessions",
+      "label": "Start sessions by itself",
+      "description": "Each new open issue nobody works on becomes a Research session: it investigates and proposes, and changes nothing until you say Act.",
+      "type": "boolean",
+      "default": false
+    },
+    {
+      "id": "startLevels",
+      "label": "Levels",
+      "description": "The issue levels that start a session.",
+      "type": "choices",
+      "options": ["fatal", "error", "warning", "info"],
+      "default": ["fatal", "error"],
+      "enabledBy": "startSessions"
+    },
+    {
+      "id": "startMaxPerDay",
+      "label": "Most per day",
+      "description": "prifly also holds it to 3 running at once and 12 an hour.",
+      "type": "number",
+      "default": 10,
+      "min": 0,
+      "max": 100,
+      "enabledBy": "startSessions"
+    }
+  ],
   "launch": [
     {
       "id": "issue",

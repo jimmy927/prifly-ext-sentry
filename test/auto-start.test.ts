@@ -6,9 +6,11 @@ import {
   type Attempt,
   DAY_MS,
   DEFAULT_START_SESSIONS,
+  hasSettings,
   issuesToStart,
   parseStartSessions,
   type StartSessions,
+  startSessionsFrom,
 } from "../auto-start";
 import { startNew } from "../index";
 import type { ExtensionApi, StartAnswer } from "../prifly-api";
@@ -52,6 +54,22 @@ describe("parseStartSessions", () => {
   test("is part of the config", () => {
     const clirc = { token: "", org: "", url: "" };
     expect(parseConfig({}, {}, clirc, "/h").startSessions).toEqual(DEFAULT_START_SESSIONS);
+  });
+});
+
+describe("startSessionsFrom", () => {
+  test("reads the Extensions page's settings", () => {
+    expect(
+      startSessionsFrom({ startSessions: true, startLevels: ["fatal"], startMaxPerDay: 3 }),
+    ).toEqual({ enabled: true, levels: ["fatal"], maxPerDay: 3 });
+    expect(startSessionsFrom({})).toEqual(DEFAULT_START_SESSIONS);
+  });
+
+  test("they count only where prifly says it keeps settings", () => {
+    const api = (over: object) => ({ ...over }) as unknown as ExtensionApi;
+    expect(hasSettings(api({ features: ["settings"], settings: {} }))).toBe(true);
+    expect(hasSettings(api({ features: [], settings: {} }))).toBe(false);
+    expect(hasSettings(api({ features: ["settings"] }))).toBe(false);
   });
 });
 
