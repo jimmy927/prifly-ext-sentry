@@ -213,6 +213,15 @@ describe("startNew", () => {
       expect(calls).toEqual(["issue:a"]);
     });
 
+    test("a newer event does not start a second session while the first is listed", async () => {
+      const { world, calls } = fakeWorld(["start-session"]);
+      (world.api as { sessions: () => unknown }).sessions = () => [{ id: "live-session" }];
+      world.issues = [seenAt(NOW - 60_000)];
+      linkIssue(world.state, "live-session", "a", NOW - 3_600_000);
+      await startNew(world, NOW);
+      expect(calls).toEqual([]);
+    });
+
     test("(c) a legacy link with no time never reopens it", async () => {
       const { world, calls } = fakeWorld(["start-session"]);
       world.state = parseState({ links: { "gone-session": ["a"] } });

@@ -145,13 +145,15 @@ function workedIssues(at: World): Set<string> {
 
 /**
  * The issues auto-start leaves alone: every issue ever linked to a session, even
- * one prifly no longer lists, since that session may have fixed it. Only an
- * event after the link (`lastSeen` later than `linkedAt`) lets it start again.
+ * one prifly no longer lists, since that session may have fixed it. Issues on a
+ * session prifly still lists are always handled (`workedIssues`); for a vanished
+ * session only an event after the link (`lastSeen` later than `linkedAt`) lets
+ * the issue start again.
  * A link with no time is from before times were kept and never reopens.
  */
 export function handledIssues(at: World): Set<string> {
   const lastSeen = new Map(at.issues.map((issue) => [issue.id, Date.parse(issue.lastSeen) || 0]));
-  const handled = new Set<string>();
+  const handled = workedIssues(at);
   for (const issueIds of Object.values(at.state.links)) {
     for (const id of issueIds) {
       const linkedAt = at.state.linkedAt[id];
