@@ -51,6 +51,13 @@ export type Config = {
 export type State = {
   /** The issues (by id) each session was started from or linked to, oldest first. */
   links: Record<string, string[]>;
+  /**
+   * Issue id → when it was last linked to a session (ms). Kept for as long as any
+   * session links the issue, so auto-start knows an issue was worked even after
+   * its session left prifly's list. A link without a time (a `state.json` from
+   * before this) counts as linked for good.
+   */
+  linkedAt: Record<string, number>;
   /** Sentry project slug → the checkout its last session was started in. */
   folders: Record<string, string>;
   /** Issue id → the last try at starting a session from it by itself, kept a day. */
@@ -123,6 +130,7 @@ export function parseState(raw: unknown): State {
   const state = obj(raw);
   return {
     links: issueLists(state["links"]),
+    linkedAt: times(state["linkedAt"]),
     folders: strings(state["folders"]),
     attempted: attempts(state["attempted"]),
   };
@@ -157,9 +165,15 @@ function issueLists(raw: unknown): Record<string, string[]> {
 }
 
 /** The issue added to the session's, once; the ones it already carries stay. */
-export function linkIssue(state: State, sessionId: string, issueId: string): void {
+export function linkIssue(
+  state: State,
+  sessionId: string,
+  issueId: string,
+  now: number = Date.now(),
+): void {
   const ids = state.links[sessionId] ?? [];
   if (!ids.includes(issueId)) state.links[sessionId] = [...ids, issueId];
+  state.linkedAt[issueId] = now;
 }
 
 /** The issue taken off the session; a session left with none is forgotten. */
@@ -167,6 +181,19 @@ export function unlinkIssue(state: State, sessionId: string, issueId: string): v
   const ids = (state.links[sessionId] ?? []).filter((id) => id !== issueId);
   if (ids.length === 0) delete state.links[sessionId];
   else state.links[sessionId] = ids;
+  // The issue is no longer worked, unless another session still carries it.
+  if (!Object.values(state.links).some((other) => other.includes(issueId))) {
+    delete state.linkedAt[issueId];
+  }
+}
+
+/** Issue id → finite time, anything else dropped. */
+function times(raw: unknown): Record<string, number> {
+  const kept: Record<string, number> = {};
+  for (const [issueId, value] of Object.entries(obj(raw))) {
+    if (typeof value === "number" && Number.isFinite(value)) kept[issueId] = value;
+  }
+  return kept;
 }
 
 /** An object's non-empty string values, by key; anything else dropped. */

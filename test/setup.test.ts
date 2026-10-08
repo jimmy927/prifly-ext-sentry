@@ -26,7 +26,7 @@ function fakeWorld(): World {
       startSessions: { enabled: false, levels: ["fatal", "error"], maxPerDay: 10 },
     },
     login: null,
-    state: { links: {}, folders: {}, attempted: {} },
+    state: { links: {}, folders: {}, linkedAt: {}, attempted: {} },
     issues: [],
     mappings: [],
     loadedAt: 0,
