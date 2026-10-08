@@ -130,7 +130,10 @@ function show(): void {
   at.api.flag?.("issue", launcherFlag(at.issues, workedIssues(at)));
 }
 
-/** The issues on a session this machine still has. */
+/**
+ * The issues on a session this machine still has: what the launcher glows by,
+ * since an issue whose session is gone has nobody on it now.
+ */
 function workedIssues(at: World): Set<string> {
   const known = new Set(at.api.sessions().map((session) => session.id));
   return new Set(
@@ -138,6 +141,26 @@ function workedIssues(at: World): Set<string> {
       known.has(sessionId) ? issueIds : [],
     ),
   );
+}
+
+/**
+ * The issues auto-start leaves alone: every issue ever linked to a session, even
+ * one prifly no longer lists, since that session may have fixed it. Issues on a
+ * session prifly still lists are always handled (`workedIssues`); for a vanished
+ * session only an event after the link (`lastSeen` later than `linkedAt`) lets
+ * the issue start again.
+ * A link with no time is from before times were kept and never reopens.
+ */
+export function handledIssues(at: World): Set<string> {
+  const lastSeen = new Map(at.issues.map((issue) => [issue.id, Date.parse(issue.lastSeen) || 0]));
+  const handled = workedIssues(at);
+  for (const issueIds of Object.values(at.state.links)) {
+    for (const id of issueIds) {
+      const linkedAt = at.state.linkedAt[id];
+      if (linkedAt === undefined || (lastSeen.get(id) ?? 0) <= linkedAt) handled.add(id);
+    }
+  }
+  return handled;
 }
 
 /**
@@ -152,7 +175,7 @@ export async function startNew(at: World, now: number): Promise<void> {
   at.state.attempted = recentAttempts(at.state.attempted, now);
   const due = issuesToStart(
     at.issues,
-    workedIssues(at),
+    handledIssues(at),
     at.state.attempted,
     at.config.startSessions,
     now,

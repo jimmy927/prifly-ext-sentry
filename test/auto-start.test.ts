@@ -15,7 +15,7 @@ import {
 import { startNew } from "../index";
 import type { ExtensionApi, StartAnswer } from "../prifly-api";
 import { type Issue, readIssue } from "../sentry";
-import { parseConfig, parseState, type World } from "../world";
+import { linkIssue, parseConfig, parseState, unlinkIssue, type World } from "../world";
 import { NOW, rawIssue } from "./fixtures";
 
 const base = readIssue(rawIssue);
@@ -238,5 +238,62 @@ describe("startNew", () => {
     world.config.startSessions = DEFAULT_START_SESSIONS;
     await startNew(world, NOW);
     expect(calls).toEqual([]);
+  });
+
+  describe("an issue whose session is gone from prifly", () => {
+    const seenAt = (ms: number) => ({ ...issue("a"), lastSeen: new Date(ms).toISOString() });
+
+    test("(a) stays unstarted while its link says a session worked it", async () => {
+      const { world, calls } = fakeWorld(["start-session"]);
+      world.issues = [seenAt(NOW - 16 * 3_600_000)];
+      linkIssue(world.state, "gone-session", "a", NOW - 15 * 3_600_000);
+      await startNew(world, NOW);
+      expect(calls).toEqual([]);
+    });
+
+    test("(b) starts again when it was seen after the link", async () => {
+      const { world, calls } = fakeWorld(["start-session"]);
+      world.issues = [seenAt(NOW - 60_000)];
+      linkIssue(world.state, "gone-session", "a", NOW - 3_600_000);
+      await startNew(world, NOW);
+      expect(calls).toEqual(["issue:a"]);
+    });
+
+    test("a newer event does not start a second session while the first is listed", async () => {
+      const { world, calls } = fakeWorld(["start-session"]);
+      (world.api as { sessions: () => unknown }).sessions = () => [{ id: "live-session" }];
+      world.issues = [seenAt(NOW - 60_000)];
+      linkIssue(world.state, "live-session", "a", NOW - 3_600_000);
+      await startNew(world, NOW);
+      expect(calls).toEqual([]);
+    });
+
+    test("(c) a legacy link with no time never reopens it", async () => {
+      const { world, calls } = fakeWorld(["start-session"]);
+      world.state = parseState({ links: { "gone-session": ["a"] } });
+      expect(world.state.linkedAt).toEqual({});
+      world.issues = [seenAt(NOW - 60_000)];
+      await startNew(world, NOW);
+      expect(calls).toEqual([]);
+    });
+
+    test("(d) unlinking forgets the link and its time", async () => {
+      const { world, calls } = fakeWorld(["start-session"]);
+      world.issues = [seenAt(NOW - 16 * 3_600_000)];
+      linkIssue(world.state, "gone-session", "a", NOW - 15 * 3_600_000);
+      unlinkIssue(world.state, "gone-session", "a");
+      expect(world.state.linkedAt).toEqual({});
+      await startNew(world, NOW);
+      expect(calls).toEqual(["issue:a"]);
+    });
+
+    test("unlinking keeps the time while another session still carries the issue", () => {
+      const state = parseState({});
+      linkIssue(state, "s1", "a", 5);
+      linkIssue(state, "s2", "a", 6);
+      unlinkIssue(state, "s1", "a");
+      expect(state.linkedAt).toEqual({ a: 6 });
+      expect(parseState(JSON.parse(JSON.stringify(state)))).toEqual(state);
+    });
   });
 });

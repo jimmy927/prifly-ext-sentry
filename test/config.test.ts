@@ -74,9 +74,10 @@ describe("parseState", () => {
     ).toEqual({
       links: { s1: ["5001", "5002"] },
       folders: { odi: "/home/me/src/odi" },
+      linkedAt: {},
       attempted: {},
     });
-    expect(parseState(null)).toEqual({ links: {}, folders: {}, attempted: {} });
+    expect(parseState(null)).toEqual({ links: {}, folders: {}, linkedAt: {}, attempted: {} });
   });
 
   test("keeps only timed tries at starting a session", () => {
@@ -92,14 +93,19 @@ describe("parseState", () => {
 
 describe("linkIssue and unlinkIssue", () => {
   test("a second issue joins the first instead of replacing it", () => {
-    const state = { links: { s1: ["5001"] }, folders: {}, attempted: {} };
+    const state = { links: { s1: ["5001"] }, folders: {}, linkedAt: {}, attempted: {} };
     linkIssue(state, "s1", "5002");
     linkIssue(state, "s1", "5002");
     expect(state.links).toEqual({ s1: ["5001", "5002"] });
   });
 
   test("unlinking the last issue forgets the session", () => {
-    const state: State = { links: { s1: ["5001", "5002"] }, folders: {}, attempted: {} };
+    const state: State = {
+      links: { s1: ["5001", "5002"] },
+      folders: {},
+      linkedAt: {},
+      attempted: {},
+    };
     unlinkIssue(state, "s1", "5001");
     expect(state.links).toEqual({ s1: ["5002"] });
     unlinkIssue(state, "s1", "5002");
