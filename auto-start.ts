@@ -19,6 +19,8 @@ export type StartSessions = {
   levels: string[];
   /** The most sessions started in any 24 hours. */
   maxPerDay: number;
+  /** Only issues seen within this many hours start a session; older ones are stale. */
+  maxAgeHours: number;
 };
 
 /** One try at starting a session from an issue: when, and whether one started. */
@@ -33,6 +35,7 @@ export const DEFAULT_START_SESSIONS: StartSessions = {
   enabled: false,
   levels: ["fatal", "error"],
   maxPerDay: 10,
+  maxAgeHours: 24,
 };
 
 /** The `startSessions` block of config.json; missing or mistyped fields take their defaults. */
@@ -42,6 +45,7 @@ export function parseStartSessions(raw: unknown): StartSessions {
     ? block["levels"].filter((level): level is string => typeof level === "string")
     : [...DEFAULT_START_SESSIONS.levels];
   const max = block["maxPerDay"];
+  const maxAge = block["maxAgeHours"];
   return {
     enabled: block["enabled"] === true,
     levels,
@@ -49,18 +53,23 @@ export function parseStartSessions(raw: unknown): StartSessions {
       typeof max === "number" && Number.isFinite(max) && max >= 0
         ? Math.floor(max)
         : DEFAULT_START_SESSIONS.maxPerDay,
+    maxAgeHours:
+      typeof maxAge === "number" && Number.isFinite(maxAge) && maxAge > 0
+        ? maxAge
+        : DEFAULT_START_SESSIONS.maxAgeHours,
   };
 }
 
 /**
  * The same, from the settings the Extensions page keeps (`prifly-extension.json`
- * declares them): `startSessions`, `startLevels`, `startMaxPerDay`.
+ * declares them): `startSessions`, `startLevels`, `startMaxPerDay`, `startMaxAgeHours`.
  */
 export function startSessionsFrom(values: Readonly<Record<string, SettingValue>>): StartSessions {
   return parseStartSessions({
     enabled: values["startSessions"],
     levels: values["startLevels"],
     maxPerDay: values["startMaxPerDay"],
+    maxAgeHours: values["startMaxAgeHours"],
   });
 }
 
@@ -81,7 +90,8 @@ export function recentAttempts(
 
 /**
  * The issues to start a session from now, in order: open, of a configured
- * level, on no session, not tried in the last day — oldest first seen first,
+ * level, last seen within `maxAgeHours` (an unreadable `lastSeen` is stale),
+ * on no session, not tried in the last day — oldest first seen first,
  * at most `MAX_PER_TICK`, and no more than the day's starts leave room for.
  */
 export function issuesToStart(
@@ -97,17 +107,24 @@ export function issuesToStart(
   const room = Math.min(MAX_PER_TICK, config.maxPerDay - startedToday);
   if (room <= 0) return [];
   const levels = new Set(config.levels);
+  const oldest = now - config.maxAgeHours * 3_600_000;
   return issues
     .filter(
       (issue) =>
         issue.status !== "resolved" &&
         issue.status !== "ignored" &&
         levels.has(issue.level) &&
+        lastSeen(issue) >= oldest &&
         !worked.has(issue.id) &&
         recent[issue.id] === undefined,
     )
     .sort((a, b) => firstSeen(a) - firstSeen(b))
     .slice(0, room);
+}
+
+/** When the issue was last seen; NaN when unreadable, which no cut-off admits. */
+function lastSeen(issue: Issue): number {
+  return Date.parse(issue.lastSeen);
 }
 
 function firstSeen(issue: Issue): number {

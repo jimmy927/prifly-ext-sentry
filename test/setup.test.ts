@@ -23,7 +23,7 @@ function fakeWorld(): World {
       period: "14d",
       sort: "date",
       refreshSeconds: 120,
-      startSessions: { enabled: false, levels: ["fatal", "error"], maxPerDay: 10 },
+      startSessions: { enabled: false, levels: ["fatal", "error"], maxPerDay: 10, maxAgeHours: 24 },
     },
     login: null,
     state: { links: {}, folders: {}, attempted: {} },

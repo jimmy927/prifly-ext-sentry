@@ -43,11 +43,22 @@ describe("parseStartSessions", () => {
     );
   });
 
+  test("a max age that is not a positive number falls back to 24 hours", () => {
+    for (const bad of [0, -5, "48", Number.NaN, Number.POSITIVE_INFINITY, null]) {
+      expect(parseStartSessions({ maxAgeHours: bad }).maxAgeHours).toBe(24);
+    }
+    expect(parseStartSessions({ maxAgeHours: 48 }).maxAgeHours).toBe(48);
+    expect(parseStartSessions({ maxAgeHours: 0.5 }).maxAgeHours).toBe(0.5);
+  });
+
   test("reads what is given", () => {
-    expect(parseStartSessions({ enabled: true, levels: ["fatal", 7], maxPerDay: 2 })).toEqual({
+    expect(
+      parseStartSessions({ enabled: true, levels: ["fatal", 7], maxPerDay: 2, maxAgeHours: 6 }),
+    ).toEqual({
       enabled: true,
       levels: ["fatal"],
       maxPerDay: 2,
+      maxAgeHours: 6,
     });
   });
 
@@ -60,8 +71,13 @@ describe("parseStartSessions", () => {
 describe("startSessionsFrom", () => {
   test("reads the Extensions page's settings", () => {
     expect(
-      startSessionsFrom({ startSessions: true, startLevels: ["fatal"], startMaxPerDay: 3 }),
-    ).toEqual({ enabled: true, levels: ["fatal"], maxPerDay: 3 });
+      startSessionsFrom({
+        startSessions: true,
+        startLevels: ["fatal"],
+        startMaxPerDay: 3,
+        startMaxAgeHours: 48,
+      }),
+    ).toEqual({ enabled: true, levels: ["fatal"], maxPerDay: 3, maxAgeHours: 48 });
     expect(startSessionsFrom({})).toEqual(DEFAULT_START_SESSIONS);
   });
 
@@ -114,6 +130,36 @@ describe("issuesToStart", () => {
       issue("b", "error", "2026-09-22T00:00:00Z"),
     ];
     expect(ids(issuesToStart(issues, none, {}, on, NOW))).toEqual(["a", "b", "c"]);
+  });
+
+  describe("freshness", () => {
+    const seen = (id: string, hoursAgo: number | string): Issue => ({
+      ...issue(id),
+      lastSeen:
+        typeof hoursAgo === "string"
+          ? hoursAgo
+          : new Date(NOW - hoursAgo * 3_600_000).toISOString(),
+    });
+
+    test("an issue last seen 30 hours ago is not started, one seen 1 hour ago is", () => {
+      expect(ids(issuesToStart([seen("old", 30), seen("new", 1)], none, {}, on, NOW))).toEqual([
+        "new",
+      ]);
+    });
+
+    test("an unreadable lastSeen is not started", () => {
+      expect(
+        issuesToStart([seen("bad", "not a date"), seen("empty", "")], none, {}, on, NOW),
+      ).toEqual([]);
+    });
+
+    test("changing the setting moves the cut-off", () => {
+      const issues = [seen("old", 30)];
+      expect(ids(issuesToStart(issues, none, {}, { ...on, maxAgeHours: 48 }, NOW))).toEqual([
+        "old",
+      ]);
+      expect(issuesToStart(issues, none, {}, { ...on, maxAgeHours: 12 }, NOW)).toEqual([]);
+    });
   });
 
   test("no more than the day's cap, counting only starts that happened", () => {

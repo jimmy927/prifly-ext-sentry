@@ -115,7 +115,7 @@ Written by the setup rows; edit it by hand if you like
   "period": "14d",
   "sort": "date",
   "refreshSeconds": 120,
-  "startSessions": { "enabled": false, "levels": ["fatal", "error"], "maxPerDay": 10 }
+  "startSessions": { "enabled": false, "levels": ["fatal", "error"], "maxPerDay": 10, "maxAgeHours": 24 }
 }
 ```
 
@@ -137,17 +137,19 @@ by git: nothing about your account or your errors is ever committed.
 
 With it turned on, each new error nobody works on becomes a session without
 a click. Turn it on in prifly's Extensions page: unfold "Sentry issues" and
-tick **Start sessions by itself**, with the **Levels** that count and the
-**Most per day**. A prifly without extension settings reads the same from
-`config.json` instead:
+tick **Start sessions by itself**, with the **Levels** that count, the
+**Most per day** and **Newest errors only (hours)**. A prifly without
+extension settings reads the same from `config.json` instead:
 
 ```json
-"startSessions": { "enabled": true, "levels": ["fatal", "error"], "maxPerDay": 10 }
+"startSessions": { "enabled": true, "levels": ["fatal", "error"], "maxPerDay": 10, "maxAgeHours": 24 }
 ```
 
 On every refresh, each open issue whose level is in `levels` and that no
 session carries yet is started, oldest first seen first, at most three a
-refresh and `maxPerDay` in any 24 hours. Each issue is asked for once a day,
+refresh and `maxPerDay` in any 24 hours. Only fresh errors count: an issue
+last seen more than `maxAgeHours` (default 24) ago, or whose last-seen time
+can't be read, is left alone. Each issue is asked for once a day,
 whatever prifly answers, so one it refused is not asked for again on every
 refresh. prifly has caps of its own on top: at most 3 of these sessions
 still working at once, and 12 started an hour.
