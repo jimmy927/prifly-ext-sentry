@@ -54,7 +54,17 @@ export type DecorationAction = {
   confirm?: string | undefined;
   /** Drawn in the danger colour. */
   destructive?: boolean | undefined;
+  /**
+   * What the reader picks before it runs. `"session"` opens prifly's session
+   * picker — every session, ended and archived ones too, searchable — and the
+   * action handler is called with the chosen one as its third argument.
+   * Cancelling the picker calls nothing.
+   */
+  pick?: "session" | undefined;
 };
+
+/** What the reader picked for an action with `pick` set; see `DecorationAction.pick`. */
+export type ActionPicked = { sessionId: string };
 
 export type Decoration = {
   /** Stable within the extension, so the window keeps an item's place. */
@@ -242,7 +252,9 @@ export type ExtensionApi = {
    * What it returns is shown to them ("Destroyed lc-box1"); what it throws is
    * shown as the failure. One handler per extension; a second call replaces it.
    */
-  onAction(handler: (key: string, action: string) => Promise<string> | string): void;
+  onAction(
+    handler: (key: string, action: string, picked?: ActionPicked) => Promise<string> | string,
+  ): void;
   /** The sessions on this machine the host knows now. */
   sessions(): ExtensionSession[];
   /** A line in the host's log, under `ext.<id>.<event>`. */
@@ -289,6 +301,14 @@ export type ExtensionModule = {
    * which session is its. Only for a launch the reader went through with.
    */
   launched?: (launchId: string, key: string, sessionId: string) => void | Promise<void>;
-  /** An item from a chip's menu, by the decoration's `key`; what it returns is said to the reader. */
-  action?: (key: string, actionId: string) => string | undefined | Promise<string | undefined>;
+  /**
+   * An item from a chip's or a board card's menu, by its `key`; what it
+   * returns is said to the reader. `picked` is the session the reader chose,
+   * for an action with `pick: "session"`.
+   */
+  action?: (
+    key: string,
+    actionId: string,
+    picked?: ActionPicked,
+  ) => string | undefined | Promise<string | undefined>;
 };

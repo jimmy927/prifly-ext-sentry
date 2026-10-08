@@ -23,8 +23,9 @@ import { mainCheckout } from "./checkout";
 import { eventId } from "./event";
 import { COLUMNS, issueChip, issueFace, issueItem, launcherFlag } from "./issue-face";
 import { issuePrompt } from "./issue-prompt";
-import { LINK_PREFIX, linkActions, withLinks } from "./link-actions";
+import { LINK_ACTION, withLink } from "./link-actions";
 import type {
+  ActionPicked,
   Decoration,
   ExtensionApi,
   ExtensionSession,
@@ -123,7 +124,6 @@ export async function choices(
             issue.shortId,
             sessionsOf(at, issue.id),
           ),
-          at,
         ),
       ),
     actions: setupTail(at),
@@ -131,12 +131,12 @@ export async function choices(
 }
 
 /**
- * An issue that already has a session can be linked to it: the menu offers
- * the recent ones, just before the destructive "Archive until it escalates".
+ * An issue that already has a session can be linked to it: "Link to
+ * session…", just before the destructive "Archive until it escalates", opens
+ * prifly's session picker.
  */
-function linkable(face: LaunchChoice, at: World): LaunchChoice {
-  const links = linkActions(at.api.sessions(), at.state.links, face.key);
-  return links.length === 0 ? face : { ...face, actions: withLinks(face.actions ?? [], links) };
+function linkable(face: LaunchChoice): LaunchChoice {
+  return { ...face, actions: withLink(face.actions ?? [], LINK_ACTION) };
 }
 
 /** The sessions on this machine that were started from this issue. */
@@ -331,10 +331,17 @@ const CHANGES: Record<string, { status: StatusChange; said: string }> = {
  * What an issue's menu offers, from its chip or its card: its status in
  * Sentry changed, then everything read again so both say so.
  */
-export async function action(key: string, actionId: string): Promise<string> {
+export async function action(
+  key: string,
+  actionId: string,
+  picked?: ActionPicked,
+): Promise<string> {
   const at = here();
-  if (actionId.startsWith(LINK_PREFIX))
-    return await link(at, key, actionId.slice(LINK_PREFIX.length));
+  if (actionId === LINK_ACTION.id) {
+    // A prifly without the session picker calls this with nothing picked.
+    if (picked === undefined) throw new Error("This prifly cannot pick a session yet: update it.");
+    return await link(at, key, picked.sessionId);
+  }
   const auth = needCreds(at);
   const change = CHANGES[actionId];
   if (change === undefined) throw new Error(`Nothing to do for ${actionId}`);
