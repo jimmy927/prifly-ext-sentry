@@ -23,7 +23,9 @@ import { mainCheckout } from "./checkout";
 import { eventId } from "./event";
 import { COLUMNS, issueChip, issueFace, issueItem, launcherFlag } from "./issue-face";
 import { issuePrompt } from "./issue-prompt";
+import { LINK_ACTION, withLink } from "./link-actions";
 import type {
+  ActionPicked,
   Decoration,
   ExtensionApi,
   ExtensionSession,
@@ -116,14 +118,25 @@ export async function choices(
     items: at.issues
       .filter((issue) => matches(issue, words))
       .map((issue) =>
-        alreadyStarted(
-          issueFace(issue, several, now, at.sparks.get(issue.id), notes.get(issue.project)),
-          issue.shortId,
-          sessionsOf(at, issue.id),
+        linkable(
+          alreadyStarted(
+            issueFace(issue, several, now, at.sparks.get(issue.id), notes.get(issue.project)),
+            issue.shortId,
+            sessionsOf(at, issue.id),
+          ),
         ),
       ),
     actions: setupTail(at),
   };
+}
+
+/**
+ * An issue that already has a session can be linked to it: "Link to
+ * session…", just before the destructive "Archive until it escalates", opens
+ * prifly's session picker.
+ */
+function linkable(face: LaunchChoice): LaunchChoice {
+  return { ...face, actions: withLink(face.actions ?? [], LINK_ACTION) };
 }
 
 /** The sessions on this machine that were started from this issue. */
@@ -318,8 +331,17 @@ const CHANGES: Record<string, { status: StatusChange; said: string }> = {
  * What an issue's menu offers, from its chip or its card: its status in
  * Sentry changed, then everything read again so both say so.
  */
-export async function action(key: string, actionId: string): Promise<string> {
+export async function action(
+  key: string,
+  actionId: string,
+  picked?: ActionPicked,
+): Promise<string> {
   const at = here();
+  if (actionId === LINK_ACTION.id) {
+    // A prifly without the session picker calls this with nothing picked.
+    if (picked === undefined) throw new Error("This prifly cannot pick a session yet: update it.");
+    return await link(at, key, picked.sessionId);
+  }
   const auth = needCreds(at);
   const change = CHANGES[actionId];
   if (change === undefined) throw new Error(`Nothing to do for ${actionId}`);
@@ -329,6 +351,21 @@ export async function action(key: string, actionId: string): Promise<string> {
   await reload(at);
   show();
   return `${change.said} ${issue?.shortId ?? key}${issue === undefined ? "" : ` “${clip(issue.title, 60)}”`}.`;
+}
+
+/**
+ * A session that was not started from the issue, given its chip anyway.
+ * Keyed by session, so a session on another issue moves to this one.
+ */
+async function link(at: World, key: string, sessionId: string): Promise<string> {
+  at.state.links[sessionId] = key;
+  await writeState(at.api.folder, at.state);
+  const issue = at.issues.find((entry) => entry.id === key) ?? at.linked.get(key);
+  if (issue !== undefined) at.linked.set(key, issue);
+  show();
+  at.api.log("linked", { issue: key, session: sessionId.slice(0, 8) });
+  const title = at.api.sessions().find((session) => session.id === sessionId)?.title;
+  return `Linked ${issue?.shortId ?? key} to ${title ?? sessionId.slice(0, 8)}.`;
 }
 
 function here(): World {
