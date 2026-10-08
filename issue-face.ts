@@ -58,18 +58,29 @@ export function issueTone(issue: Issue): DecorationTone {
   return "info";
 }
 
+const LIGHTING = new Set(["fatal", "error", "warning", "info"]);
+
 /**
- * The launcher button's glow: red while any open issue is a fatal or an
- * error, orange while the open ones are only warnings or info, out when
- * nothing is open. Debug never lights it.
+ * The launcher button's glow: red while any open issue without a session is a
+ * fatal or an error, orange while those are only warnings or info, blue once
+ * every open issue has a session working on it, out when nothing is open.
+ * Debug never lights it.
  */
-export function launcherFlag(issues: readonly Issue[]): LauncherFlag | null {
-  const open = issues.filter((issue) => issue.status !== "resolved" && issue.status !== "ignored");
-  const errors = open.filter((issue) => issue.level === "fatal" || issue.level === "error");
+export function launcherFlag(
+  issues: readonly Issue[],
+  worked: ReadonlySet<string> = new Set(),
+): LauncherFlag | null {
+  const open = issues.filter(
+    (issue) =>
+      issue.status !== "resolved" && issue.status !== "ignored" && LIGHTING.has(issue.level),
+  );
+  const unworked = open.filter((issue) => !worked.has(issue.id));
+  const errors = unworked.filter((issue) => issue.level === "fatal" || issue.level === "error");
   if (errors.length > 0) return { tone: "critical", hint: plural(errors.length, "open error") };
-  const warnings = open.filter((issue) => issue.level === "warning" || issue.level === "info");
-  if (warnings.length > 0)
-    return { tone: "warning", hint: plural(warnings.length, "open warning") };
+  if (unworked.length > 0)
+    return { tone: "warning", hint: plural(unworked.length, "open warning") };
+  if (open.length > 0)
+    return { tone: "info", hint: `${plural(open.length, "open issue")}, all with a session` };
   return null;
 }
 

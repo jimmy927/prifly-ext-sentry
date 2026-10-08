@@ -108,7 +108,12 @@ function show(): void {
     if (chips.length > 0) bySession[sessionId] = chips;
   }
   at.api.show(bySession, []);
-  at.api.flag?.("issue", launcherFlag(at.issues));
+  const worked = new Set(
+    Object.entries(at.state.links).flatMap(([sessionId, issueIds]) =>
+      known.has(sessionId) ? issueIds : [],
+    ),
+  );
+  at.api.flag?.("issue", launcherFlag(at.issues, worked));
 }
 
 /**
