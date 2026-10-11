@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -14,10 +14,15 @@ function settings(
 ) {
   const dir = mkdtempSync(join(tmpdir(), "sentry-skill-"));
   const db = join(dir, "prifly.db");
+  // The script runs from a copy inside the temp dir, so the extension folder it
+  // looks in for auth.json is empty, whatever the checkout the tests run in holds.
+  const copied = join(dir, "ext", "skills", "sentry");
+  mkdirSync(copied, { recursive: true });
+  copyFileSync(join(skillDir, "sentry.py"), join(copied, "sentry.py"));
   if (rc !== null) writeFileSync(join(dir, ".sentryclirc"), rc);
   const script = `
 import sqlite3, sys, json
-sys.path.insert(0, ${JSON.stringify(skillDir)})
+sys.path.insert(0, ${JSON.stringify(copied)})
 seed = json.loads(${JSON.stringify(JSON.stringify(seed))})
 if seed is not None:
     con = sqlite3.connect(${JSON.stringify(db)})
@@ -67,6 +72,23 @@ describe("the sentry skill's organization", () => {
       "t",
       "o",
     ]);
+  });
+
+  test("the token is SENTRY_AUTH_TOKEN, or SENTRY_TOKEN as vault_run sets it for the entry sentry", () => {
+    const row = JSON.stringify({ org: "o" });
+    expect(JSON.parse(settings({ SENTRY_AUTH_TOKEN: "auth" }, row).out)[1]).toBe("auth");
+    expect(JSON.parse(settings({ SENTRY_AUTH_TOKEN: "", SENTRY_TOKEN: "vault" }, row).out)[1]).toBe(
+      "vault",
+    );
+    expect(
+      JSON.parse(settings({ SENTRY_AUTH_TOKEN: "auth", SENTRY_TOKEN: "vault" }, row).out)[1],
+    ).toBe("auth");
+  });
+
+  test("without any token it points at vault_run", () => {
+    const row = JSON.stringify({ org: "o" });
+    const err = settings({ SENTRY_AUTH_TOKEN: "" }, row).err;
+    expect(err).toContain('vault_run tool, entry "sentry"');
   });
 
   test("an empty value, a missing row or database falls through", () => {

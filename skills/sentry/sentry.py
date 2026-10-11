@@ -3,11 +3,16 @@
 Sentry CLI for Claude Code sessions: search issues, read an issue and an
 event, list an issue's events, and resolve / archive / reopen an issue.
 
-Credentials, in order: SENTRY_AUTH_TOKEN; the prifly Sentry extension's
-auth.json (the token the reader pasted into prifly's "From a Sentry issue…");
-~/.sentryclirc's [auth] token (what `sentry-cli login` writes). The
-organization and address: --org / --base-url, SENTRY_ORG / SENTRY_URL, then the
-Sentry extension's settings in prifly's database (read-only), then
+Credentials, in order: SENTRY_AUTH_TOKEN (or SENTRY_TOKEN); the prifly Sentry
+extension's auth.json (the token the reader pasted into prifly's "From a Sentry
+issue…", on a prifly without the vault); ~/.sentryclirc's [auth] token (what
+`sentry-cli login` writes). The reader's login lives in prifly's vault as the
+entry "sentry": run this script through the vault_run tool with entry "sentry",
+which hands the token over as SENTRY_TOKEN (the name the vault gives an
+api-token entry called "sentry").
+
+The organization and address: --org / --base-url, SENTRY_ORG / SENTRY_URL, then
+the Sentry extension's settings in prifly's database (read-only), then
 ~/.sentryclirc's [defaults]. Standard library only.
 """
 
@@ -86,11 +91,17 @@ def clirc(section: str, key: str) -> str:
 
 def settings(org_flag: str | None, base_flag: str | None = None) -> tuple[str, str, str]:
     """The API root, the token and the organization."""
-    token = os.environ.get("SENTRY_AUTH_TOKEN") or read_json("auth.json", "token") or clirc("auth", "token")
+    token = (
+        os.environ.get("SENTRY_AUTH_TOKEN")
+        or os.environ.get("SENTRY_TOKEN")
+        or read_json("auth.json", "token")
+        or clirc("auth", "token")
+    )
     if not token:
         sys.exit(
-            "not logged in to Sentry: open prifly, click 'From a Sentry issue…' and log in "
-            "(or set SENTRY_AUTH_TOKEN, or run `sentry-cli login`)"
+            "no Sentry token: the login is in prifly's vault. Run this script with the "
+            "vault_run tool, entry \"sentry\" (it sets SENTRY_TOKEN), or log in from prifly: "
+            "'From a Sentry issue…' (or set SENTRY_AUTH_TOKEN, or run `sentry-cli login`)"
         )
     base = base_flag or os.environ.get("SENTRY_URL") or db_base_url() or clirc("defaults", "url")
     org = org_flag or os.environ.get("SENTRY_ORG") or prifly_setting("org") or clirc("defaults", "org")
