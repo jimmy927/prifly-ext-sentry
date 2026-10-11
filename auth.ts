@@ -9,20 +9,42 @@
  *
  * Found, in this order:
  *
- * 1. `auth.json` next to this file — pasted into the chooser's login row,
- *    readable only by the user who owns it, gone again on "Log out".
- * 2. `SENTRY_AUTH_TOKEN` in the host's environment — sentry-cli's variable.
- * 3. `~/.sentryclirc`'s `[auth] token` — what `sentry-cli login` writes.
+ * 1. prifly's vault, the entry `sentry` (`api.vault.read`) — where a token
+ *    pasted into the chooser's login row is filed on a prifly with
+ *    "vault-file", so it moves with prifly's data. Gone again on "Log out".
+ * 2. `auth.json` next to this file — where that token is kept on an older
+ *    prifly, readable only by the user who owns it. On a newer one it is only
+ *    a leftover: moved into the vault on the first start (the reader confirms
+ *    on prifly's vault card) and deleted; kept, and still used, while the
+ *    reader has declined, until they log in again.
+ * 3. `SENTRY_AUTH_TOKEN` in the host's environment — sentry-cli's variable.
+ * 4. `~/.sentryclirc`'s `[auth] token` — what `sentry-cli login` writes.
  *
  * The last two belong to sentry-cli, so this extension reads them and never
- * writes or deletes them.
+ * writes or deletes them. No message or log line here carries a token.
  */
 
 import { chmod } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { ExtensionApi } from "./prifly-api";
 
-export type LoginSource = "auth.json" | "SENTRY_AUTH_TOKEN" | "~/.sentryclirc";
+export type LoginSource = "prifly vault" | "auth.json" | "SENTRY_AUTH_TOKEN" | "~/.sentryclirc";
+
+/** The vault entry's name; the manifest's `vault` list names it too. */
+export const VAULT_ENTRY = "sentry";
+
+/** The part of the api the login uses; a fake of it is all the tests need. */
+export type LoginApi = Pick<ExtensionApi, "features" | "vault" | "log">;
+
+/** Whether this prifly files and forgets logins in its vault ("vault-file"). */
+export function canFileToVault(api: LoginApi): boolean {
+  return (
+    api.features?.includes("vault-file") === true &&
+    typeof api.vault?.file === "function" &&
+    typeof api.vault.forget === "function"
+  );
+}
 
 export type Login = { token: string; user: string; source: LoginSource };
 
@@ -90,21 +112,37 @@ export async function findLogin(
   folder: string,
   env: Record<string, string | undefined>,
   clirc: Clirc,
+  api?: LoginApi,
 ): Promise<Login | null> {
-  const saved = (await Bun.file(join(folder, "auth.json"))
-    .json()
-    .catch(() => null)) as { token?: unknown; user?: unknown } | null;
-  if (typeof saved?.token === "string" && saved.token !== "") {
-    return {
-      token: saved.token,
-      user: typeof saved.user === "string" ? saved.user : "you",
-      source: "auth.json",
-    };
-  }
+  const filed = await readVault(api);
+  if (filed !== null) return { token: filed, user: "", source: "prifly vault" };
+  const saved = await readSaved(folder);
+  if (saved !== null) return { ...saved, source: "auth.json" };
   const fromEnv = env["SENTRY_AUTH_TOKEN"] ?? "";
   if (fromEnv !== "") return { token: fromEnv, user: "", source: "SENTRY_AUTH_TOKEN" };
   if (clirc.token !== "") return { token: clirc.token, user: "", source: "~/.sentryclirc" };
   return null;
+}
+
+/** The vault entry's token; null on a prifly without a vault, with no entry, or when reading fails. */
+async function readVault(api: LoginApi | undefined): Promise<string | null> {
+  if (typeof api?.vault?.read !== "function") return null;
+  try {
+    const token = await api.vault.read(VAULT_ENTRY);
+    return typeof token === "string" && token !== "" ? token : null;
+  } catch (caught) {
+    api.log("vault_read_failed", { message: caught instanceof Error ? caught.message : "failed" });
+    return null;
+  }
+}
+
+/** What `auth.json` holds, or null when it is missing, unreadable or has no token. */
+async function readSaved(folder: string): Promise<{ token: string; user: string } | null> {
+  const saved = (await Bun.file(join(folder, "auth.json"))
+    .json()
+    .catch(() => null)) as { token?: unknown; user?: unknown } | null;
+  if (typeof saved?.token !== "string" || saved.token === "") return null;
+  return { token: saved.token, user: typeof saved.user === "string" ? saved.user : "you" };
 }
 
 export async function writeLogin(folder: string, token: string, user: string): Promise<void> {
@@ -118,6 +156,139 @@ export async function forgetLogin(folder: string): Promise<void> {
   await Bun.file(join(folder, "auth.json"))
     .delete()
     .catch(() => undefined);
+}
+
+/**
+ * Marks that the reader declined prifly's vault card for the token in
+ * `auth.json`, so the move is not asked again at every start. Next to
+ * `auth.json`, and gone again when the reader logs in.
+ */
+const DECLINED = "vault-declined";
+
+async function markDeclined(folder: string): Promise<void> {
+  await Bun.write(join(folder, DECLINED), "");
+}
+
+async function clearDeclined(folder: string): Promise<void> {
+  await Bun.file(join(folder, DECLINED))
+    .delete()
+    .catch(() => undefined);
+}
+
+async function wasDeclined(folder: string): Promise<boolean> {
+  return await Bun.file(join(folder, DECLINED)).exists();
+}
+
+function hostOf(baseUrl: string): string | undefined {
+  try {
+    return new URL(baseUrl).host || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function labelOf(user: string): string {
+  return user === "" || user === "you" ? "Sentry" : `Sentry, ${user}`;
+}
+
+/** How a login the reader just made was kept; `reason` is for the reader, never the token. */
+export type SaveResult =
+  | { saved: true; source: "prifly vault" | "auth.json" }
+  | { saved: false; reason: string };
+
+/**
+ * Keep a token the reader pasted. With "vault-file" it is filed in prifly's
+ * vault (the reader confirms on the card) and no `auth.json` is written — one
+ * left from before is deleted; on an older prifly it goes to `auth.json` as it
+ * always did. A login clears the "declined" marker, because the reader is
+ * asking for it again; declining this card sets it again.
+ */
+export async function saveLogin(
+  api: LoginApi,
+  folder: string,
+  token: string,
+  user: string,
+  baseUrl: string,
+): Promise<SaveResult> {
+  if (!canFileToVault(api)) {
+    await writeLogin(folder, token, user);
+    await clearDeclined(folder);
+    return { saved: true, source: "auth.json" };
+  }
+  const answer = await api.vault?.file?.(VAULT_ENTRY, {
+    token,
+    label: labelOf(user),
+    host: hostOf(baseUrl),
+    why: "Your Sentry issues in prifly: the token you just pasted into the Sentry chooser",
+  });
+  if (answer?.outcome === "accepted") {
+    await forgetLogin(folder);
+    await clearDeclined(folder);
+    return { saved: true, source: "prifly vault" };
+  }
+  if (answer?.outcome === "declined") {
+    await markDeclined(folder);
+    return {
+      saved: false,
+      reason: "You declined to keep the token in prifly's vault, so it was not saved.",
+    };
+  }
+  if (answer?.outcome === "refused") {
+    return { saved: false, reason: `prifly's vault refused the token: ${answer.message}` };
+  }
+  return { saved: false, reason: "The vault card was not answered, so the token was not saved." };
+}
+
+/** Log out: forget the vault entry this extension filed, and delete `auth.json`. */
+export async function removeLogin(api: LoginApi, folder: string): Promise<void> {
+  if (canFileToVault(api)) await api.vault?.forget?.(VAULT_ENTRY);
+  await forgetLogin(folder);
+  await clearDeclined(folder);
+}
+
+/** What `moveToVault` did, for the log. */
+export type MoveOutcome =
+  | "moved"
+  | "declined"
+  | "unanswered"
+  | "unavailable"
+  | "nothing to move"
+  | "already declined"
+  | "vault has one";
+
+/**
+ * The one-time move: on a prifly with "vault-file", a token in `auth.json`
+ * with no vault entry yet is filed in the vault (the reader confirms on the
+ * card, which can take as long as they like), and `auth.json` is deleted once
+ * they accept. Declined, `auth.json` stays in use and is not offered again
+ * until the reader logs in. A card that went unanswered or was refused is
+ * asked again at the next start.
+ */
+export async function moveToVault(
+  api: LoginApi,
+  folder: string,
+  baseUrl: string,
+): Promise<MoveOutcome> {
+  if (!canFileToVault(api)) return "unavailable";
+  const saved = await readSaved(folder);
+  if (saved === null) return "nothing to move";
+  if (await wasDeclined(folder)) return "already declined";
+  if ((await readVault(api)) !== null) return "vault has one";
+  const answer = await api.vault?.file?.(VAULT_ENTRY, {
+    token: saved.token,
+    label: labelOf(saved.user),
+    host: hostOf(baseUrl),
+    why: "Moves the Sentry token from auth.json in the extension's folder into the vault, so it travels with prifly's data",
+  });
+  if (answer?.outcome === "accepted") {
+    await forgetLogin(folder);
+    return "moved";
+  }
+  if (answer?.outcome === "declined") {
+    await markDeclined(folder);
+    return "declined";
+  }
+  return "unanswered";
 }
 
 /** Where the reader makes a personal token, on their own Sentry. */

@@ -3,7 +3,7 @@
  *
  * Three small files sit next to this one, none of them in git: `config.json`
  * (the organization and how the list is sorted), `auth.json` (the reader's
- * own token, when it was pasted here — `auth.ts`), and `state.json` (which
+ * own token, only on a prifly without a vault — `auth.ts`), and `state.json` (which
  * session was started from which issue, and which folder each project's
  * sessions were last started in). Saved events go under `issues/`, also out
  * of git.
@@ -268,7 +268,7 @@ export async function load(api: ExtensionApi): Promise<World> {
     api,
     config,
     file,
-    login: await findLogin(api.folder, Bun.env, clirc),
+    login: await findLogin(api.folder, Bun.env, clirc, api),
     state: await readState(api.folder),
     issues: [],
     mappings: [],

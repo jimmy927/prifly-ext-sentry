@@ -20,6 +20,7 @@
 
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { findLogin, moveToVault, readClirc } from "./auth";
 import { hasSettings, issuesToStart, recentAttempts, starter } from "./auto-start";
 import { mainCheckout } from "./checkout";
 import { eventId } from "./event";
@@ -109,6 +110,19 @@ export async function activate(api: ExtensionApi): Promise<() => void> {
       })().catch((caught) => api.log("settings_failed", { message: message(caught) }));
     });
   }
+  // A token still in auth.json moves into prifly's vault, in the background:
+  // the reader's answer on the card can take any time, and until then (and
+  // after a "no") auth.json keeps the extension working.
+  const started = world;
+  void moveToVault(api, api.folder, started.config.baseUrl)
+    .then(async (outcome) => {
+      api.log("vault_move", { outcome });
+      if (outcome !== "moved" || stopped || world !== started) return;
+      started.login = await findLogin(api.folder, Bun.env, await readClirc(), api);
+      started.loadedAt = 0;
+      await tick();
+    })
+    .catch((caught) => api.log("vault_move_failed", { message: message(caught) }));
   await tick();
   return () => {
     stopped = true;

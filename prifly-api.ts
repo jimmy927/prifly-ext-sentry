@@ -240,12 +240,43 @@ export type StartAnswer = { started: true; sessionId: string } | { started: fals
 /** A session the host knows, for an extension to match its things against. */
 export type ExtensionSession = { id: string; title: string; cwd: string; state: string };
 
+/** What `api.vault.file` asks of the reader; the token never comes back. */
+export type VaultFileRequest = {
+  token: string;
+  label?: string | undefined;
+  host?: string | undefined;
+  why: string;
+};
+
+/** How the reader answered the vault card, or why none was shown. */
+export type VaultFileResult =
+  | { outcome: "accepted"; level: 1 | 2 | 4 }
+  | { outcome: "declined" }
+  | { outcome: "timed out" }
+  | { outcome: "refused"; message: string };
+
+/**
+ * The vault entries this extension's manifest names under `vault`.
+ * `read` is on any prifly with a vault; `file` and `forget` only where
+ * `features` includes "vault-file".
+ */
+export type ExtensionVaultApi = {
+  /** An `api-token` entry's token, or null (no entry, not level 1, not in the manifest). */
+  read(name: string): Promise<string | null>;
+  /** Asks the reader to file `token` as the entry `name`; resolves once they answer. */
+  file?(name: string, request: VaultFileRequest): Promise<VaultFileResult>;
+  /** Log out: removes an entry this extension filed; true when it did. */
+  forget?(name: string): Promise<boolean>;
+};
+
 export type ExtensionApi = {
   /**
    * What this prifly accepts beyond the first version, by name — "start-session"
    * among them where `start` exists. Absent on a prifly that predates the list.
    */
   features?: readonly string[];
+  /** The vault entries the manifest's `vault` list names. Absent on a prifly without one. */
+  vault?: ExtensionVaultApi;
   /**
    * Replace everything this extension shows. `bySession` is keyed by a
    * session id or any unique start of one (a label has room for 8 characters);

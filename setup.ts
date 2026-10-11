@@ -11,12 +11,13 @@
  */
 
 import {
+  canFileToVault,
   findLogin,
-  forgetLogin,
   looksLikeToken,
   readClirc,
+  removeLogin,
+  saveLogin,
   tokenPageUrl,
-  writeLogin,
 } from "./auth";
 import { openBrowser } from "./open-browser";
 import type { Launch, LaunchChoice } from "./prifly-api";
@@ -92,6 +93,9 @@ const TOKEN_PERMISSIONS =
   "Organization: Read. Member: No Access. Alerts: No Access.";
 
 function loginRows(world: World): LaunchChoice[] {
+  const keptIn = canFileToVault(world.api)
+    ? "prifly's vault (you confirm on a card)"
+    : "this machine only (auth.json, readable by you alone)";
   return [
     {
       key: KEYS.open,
@@ -105,8 +109,7 @@ function loginRows(world: World): LaunchChoice[] {
       key: KEYS.token,
       title: "2. Paste the token Sentry shows you",
       group: "Log in",
-      detail:
-        "Sentry shows it once. It is checked there and then and kept on this machine only (auth.json, readable by you alone).",
+      detail: `Sentry shows it once. It is checked there and then and kept in ${keptIn}.`,
       tone: "info",
       input: { title: "Your Sentry auth token", placeholder: "sntryu_…" },
     },
@@ -162,9 +165,13 @@ async function saveToken(world: World, input: string): Promise<Launch> {
   // Asked of Sentry before it is kept: a token that does not work should fail
   // here, where the reader is looking, not quietly on the next refresh.
   const user = await whoami({ baseUrl: world.config.baseUrl, token });
-  await writeLogin(world.api.folder, token, user);
-  world.login = { token, user, source: "auth.json" };
-  world.api.log("logged_in", { user });
+  const kept = await saveLogin(world.api, world.api.folder, token, user, world.config.baseUrl);
+  if (!kept.saved) {
+    world.api.log("login_not_saved", { user });
+    return { prompt: "", message: kept.reason };
+  }
+  world.login = { token, user, source: kept.source };
+  world.api.log("logged_in", { user, source: kept.source });
   return { prompt: "", message: `Logged in as ${user}.` };
 }
 
@@ -191,8 +198,8 @@ async function toggleSort(world: World): Promise<Launch> {
 }
 
 async function logOut(world: World): Promise<Launch> {
-  await forgetLogin(world.api.folder);
-  world.login = await findLogin(world.api.folder, Bun.env, await readClirc());
+  await removeLogin(world.api, world.api.folder);
+  world.login = await findLogin(world.api.folder, Bun.env, await readClirc(), world.api);
   world.issues = [];
   world.loadedAt = 0;
   world.linked = new Map();

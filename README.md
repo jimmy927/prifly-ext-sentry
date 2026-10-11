@@ -64,8 +64,10 @@ Open **From a Sentry issue…** and follow the rows it shows:
    403, and the extension's error (and the `sentry.py` skill's) names which
    permission to raise.
 2. **Paste the token Sentry shows you** — one paste, once. It is checked
-   against Sentry there and then and kept in `auth.json` in this folder,
-   readable only by you.
+   against Sentry there and then and kept in **prifly's vault** (the entry
+   `sentry`; prifly shows you a card to confirm it, and the token travels with
+   prifly's data). On a prifly older than the vault's "vault-file" feature it
+   is kept in `auth.json` in this folder instead, readable only by you.
 3. **Choose an organization** — and that is all. Every project in it is
    listed, including ones made in Sentry later; there are no projects to map.
 
@@ -99,8 +101,16 @@ token in any other way, and sessions are told never to ask for one.
 
 The rows kept beside the issues change any of it later: **Sort by events / last
 seen**, **Switch organization…**, **Log out of Sentry**
-(which deletes `auth.json`; a token from `SENTRY_AUTH_TOKEN` or
-`~/.sentryclirc` is sentry-cli's, and stays).
+(which removes the vault entry and deletes `auth.json`; a token from
+`SENTRY_AUTH_TOKEN` or `~/.sentryclirc` is sentry-cli's, and stays).
+
+The token is looked for in this order: the vault entry `sentry`, `auth.json`,
+`SENTRY_AUTH_TOKEN`, `~/.sentryclirc`. `auth.json` only exists on an older
+prifly, or from before the vault: on the first start with "vault-file" the
+extension offers to file its token in the vault (you confirm on prifly's card)
+and deletes `auth.json` once you accept. If you decline, `auth.json` stays and
+keeps working, and you are not asked again until you log in again. The token is
+never written to prifly's log or shown in a message.
 
 ## Settings and config.json
 
@@ -148,7 +158,7 @@ chooser is kept. A prifly without extension settings reads `config.json` alone.
 - `baseUrl` — for a self-hosted Sentry.
 - `startSessions` — see below; off unless you turn it on.
 
-`config.json`, `auth.json`, `state.json` and the saved `issues/` are all ignored
+`config.json`, `auth.json`, `vault-declined`, `state.json` and the saved `issues/` are all ignored
 by git: nothing about your account or your errors is ever committed.
 
 ## Starting sessions by itself
