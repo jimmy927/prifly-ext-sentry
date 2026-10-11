@@ -63,6 +63,7 @@ import {
   reload,
   unlinkIssue,
   type World,
+  withUser,
 } from "./world";
 
 let world: World | null = null;
@@ -118,7 +119,11 @@ export async function activate(api: ExtensionApi): Promise<() => void> {
     .then(async (outcome) => {
       api.log("vault_move", { outcome });
       if (outcome !== "moved" || stopped || world !== started) return;
-      started.login = await findLogin(api.folder, Bun.env, await readClirc(), api);
+      started.login = await withUser(
+        api,
+        started.config,
+        await findLogin(api.folder, Bun.env, await readClirc(), api),
+      );
       started.loadedAt = 0;
       await tick();
     })

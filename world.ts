@@ -36,6 +36,7 @@ import {
   organizationIssues,
   SentryError,
   type Sort,
+  whoami,
 } from "./sentry";
 import { SETTING_DEFAULTS, settingsRaw, type Values } from "./settings";
 
@@ -255,6 +256,35 @@ async function mappingsOrNone(world: World, auth: Creds): Promise<CodeMapping[]>
   }
 }
 
+/** How long a start waits for Sentry to say whose token the vault holds. */
+const NAME_WAIT_MS = 5000;
+
+/**
+ * The vault entry holds only the token, so a login read from it has no name.
+ * Ask Sentry, the way logging in did. If that fails or is slow (offline,
+ * Sentry down) the login keeps an empty name, which shows the neutral label;
+ * the log says why, never the token. Other sources are left as they are.
+ */
+export async function withUser(
+  api: ExtensionApi,
+  config: { baseUrl: string },
+  login: Login | null,
+): Promise<Login | null> {
+  if (login === null || login.source !== "prifly vault" || login.user !== "") return login;
+  try {
+    const user = await Promise.race([
+      whoami({ baseUrl: config.baseUrl, token: login.token }),
+      new Promise<never>((_, reject) => {
+        setTimeout(() => reject(new Error("timed out")), NAME_WAIT_MS).unref();
+      }),
+    ]);
+    return { ...login, user };
+  } catch (caught) {
+    api.log("user_name_failed", { message: caught instanceof Error ? caught.message : "failed" });
+    return login;
+  }
+}
+
 export async function load(api: ExtensionApi): Promise<World> {
   const clirc = await readClirc();
   // Settings and state live in prifly's database. A prifly without them gets
@@ -275,11 +305,12 @@ export async function load(api: ExtensionApi): Promise<World> {
   const state = stored
     ? parseState(await store.importOnce(STATE_DOC, () => legacyState(api.folder)))
     : parseState({});
+  const config = effectiveConfig(settingValues(api), choices, clirc);
   return {
     api,
-    config: effectiveConfig(settingValues(api), choices, clirc),
+    config,
     choices,
-    login: await findLogin(api.folder, Bun.env, clirc, api),
+    login: await withUser(api, config, await findLogin(api.folder, Bun.env, clirc, api)),
     state,
     issues: [],
     mappings: [],
