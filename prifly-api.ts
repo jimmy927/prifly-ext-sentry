@@ -284,6 +284,12 @@ export type ExtensionApi = {
   settings?: Readonly<Record<string, SettingValue>>;
   /** Called with every value after the reader changes one. One handler; a second call replaces it. */
   onSettings?(handler: (values: Readonly<Record<string, SettingValue>>) => void): void;
+  /**
+   * What the extension keeps for itself, in prifly's database: JSON
+   * documents and append-only logs, moving with prifly's data. Only where
+   * `features` includes "state".
+   */
+  state?: ExtensionStateApi;
   /** The sessions on this machine the host knows now. */
   sessions(): ExtensionSession[];
   /** A line in the host's log, under `ext.<id>.<event>`. */
@@ -340,4 +346,39 @@ export type ExtensionModule = {
     actionId: string,
     picked?: ActionPicked,
   ) => string | undefined | Promise<string | undefined>;
+};
+
+/** `api.state`, as prifly's `state.ts` declares it. Absent on an older prifly: check `features` for "state". */
+export type ExtensionStateApi = {
+  /** The document `name`, or undefined when there is none. `T` is what the caller says it is, unchecked. */
+  get<T = unknown>(name: string): Promise<NoInfer<T> | undefined>;
+  /** Replace the document `name` with `value`, in one write. */
+  set(name: string, value: unknown): Promise<void>;
+  /**
+   * Read the document, give it to `fn` (undefined when there is none), and
+   * store what `fn` returns. Writes to one name run one at a time, so two
+   * updates never lose each other's change. Never await a write to the same
+   * name inside `fn`.
+   */
+  update<T>(name: string, fn: (current: T | undefined) => T | Promise<T>): Promise<T>;
+  /** Remove the document `name`; true when there was one. */
+  delete(name: string): Promise<boolean>;
+  /** The names of this extension's documents, sorted. */
+  list(): Promise<string[]>;
+  /**
+   * Bring state in from somewhere else once: when the document `name`
+   * exists it is returned and `make` is not called; otherwise `make`'s value
+   * is stored and returned, and undefined from `make` stores nothing.
+   */
+  importOnce<T>(
+    name: string,
+    make: () => T | undefined | Promise<T | undefined>,
+  ): Promise<T | undefined>;
+  /** Add `entry` to the end of the log `name`; resolves to its `seq`. */
+  append(name: string, entry: unknown): Promise<number>;
+  /** The log `name`'s entries, oldest first. */
+  read<T = unknown>(
+    name: string,
+    options?: { after?: number; since?: number; limit?: number },
+  ): Promise<{ seq: number; at: number; entry: NoInfer<T> }[]>;
 };

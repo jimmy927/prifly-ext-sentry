@@ -6,7 +6,7 @@ event, list an issue's events, and resolve / archive / reopen an issue.
 Credentials, in order: SENTRY_AUTH_TOKEN; the prifly Sentry extension's
 auth.json (the token the reader pasted into prifly's "From a Sentry issue…");
 ~/.sentryclirc's [auth] token (what `sentry-cli login` writes). The
-organization: --org, SENTRY_ORG, the extension's config.json, then
+organization: --org, SENTRY_ORG, then
 ~/.sentryclirc's [defaults] org. Standard library only.
 """
 
@@ -64,10 +64,10 @@ def settings(org_flag: str | None) -> tuple[str, str, str]:
             "not logged in to Sentry: open prifly, click 'From a Sentry issue…' and log in "
             "(or set SENTRY_AUTH_TOKEN, or run `sentry-cli login`)"
         )
-    base = os.environ.get("SENTRY_URL") or read_json("config.json", "baseUrl") or clirc("defaults", "url")
-    org = org_flag or os.environ.get("SENTRY_ORG") or read_json("config.json", "org") or clirc("defaults", "org")
+    base = os.environ.get("SENTRY_URL") or clirc("defaults", "url")
+    org = org_flag or os.environ.get("SENTRY_ORG") or clirc("defaults", "org")
     if not org:
-        sys.exit("no Sentry organization: pass --org, or choose one in prifly's 'From a Sentry issue…'")
+        sys.exit("no Sentry organization: pass --org, or set SENTRY_ORG, or put it in ~/.sentryclirc")
     return (base or "https://sentry.io").rstrip("/") + "/api/0", token, org
 
 

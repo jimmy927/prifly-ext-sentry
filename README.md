@@ -77,9 +77,10 @@ code is in — its **code mappings**, under Settings → Integrations → GitHub
 GitLab…) → Code Mappings — and this machine knows where that repository is
 checked out. Looked for in this order:
 
-1. a folder pinned to the project in the **Project folders** setting or
-   `config.json`'s `projects` (optional);
-2. the checkout the project's last session ran in (remembered in `state.json`);
+1. a folder pinned to the project in the **Project folders** setting
+   (optional);
+2. the checkout the project's last session ran in (remembered in prifly's
+   database, see below);
 3. the checkout behind any folder a prifly session on this machine runs in;
 4. a checkout in `~`, `~/src` or `~/code` whose git remote is the repo — a
    hand-made mapping of the whole stack wins over ones Sentry generated;
@@ -102,54 +103,45 @@ seen**, **Switch organization…**, **Log out of Sentry**
 (which deletes `auth.json`; a token from `SENTRY_AUTH_TOKEN` or
 `~/.sentryclirc` is sentry-cli's, and stays).
 
-## Settings and config.json
+## Settings and what the extension remembers
 
-In a prifly with extension settings, the plain settings live in prifly's
-Extensions page (unfold "Sentry issues"): **Sentry organization**, **Sentry
-address**, **Project folders**, **Search**, **Seen within**, **Sort by**,
-**Refresh every** and the auto-start ones below. prifly keeps them with its
-own data, so they move with it to another host. On a Windows host, set the
-project folder once there, as `slug=folder` pairs separated by `;`
-(`odi=C:\Users\you\src\odi`).
+This extension keeps no settings or state in files in its folder. The plain
+settings live in prifly's Extensions page (unfold "Sentry issues"): **Sentry
+organization**, **Sentry address**, **Project folders**, **Search**, **Seen
+within**, **Sort by**, **Refresh every** and the auto-start ones below. prifly
+keeps them with its own data, so they move with it to another host. On a
+Windows host, set the project folder once there, as `slug=folder` pairs
+separated by `;` (`odi=C:\Users\you\src\odi`).
 
-An extension cannot write its own settings, so `config.json` is not imported
-into them. Instead, per setting: one that is not at its default wins, and one
-still at its default lets `config.json`'s value through (for **Project
-folders**, per project). When that happens the log says once, as
-`config_json_in_use`, which settings to enter in the dialog; after that
-`config.json` can go. The setup rows (organization, **Sort by events / last
-seen**) still write `config.json`, which is also where a choice made in the
-chooser is kept. A prifly without extension settings reads `config.json` alone.
-
-`config.json` is written by the setup rows; edit it by hand if you like
-(`config.example.json` shows every field):
-
-```json
-{
-  "org": "morpheus-0r",
-  "baseUrl": "https://sentry.io",
-  "projects": {},
-  "query": "is:unresolved",
-  "period": "14d",
-  "sort": "date",
-  "refreshSeconds": 120,
-  "startSessions": { "enabled": false, "levels": ["fatal", "error"], "maxPerDay": 10, "maxAgeHours": 24 }
-}
-```
-
-- `projects` — optional: Sentry project slug → a folder its sessions always
-  start in, over whatever is found (`~` is expanded). Usually empty. It no
-  longer decides which projects are listed: all of them are.
-- `query` — Sentry search syntax for the list (`is:unresolved level:error`,
+- **Project folders** — optional: Sentry project slug → a folder its sessions
+  always start in, over whatever is found (`~` is expanded). Usually empty. It
+  does not decide which projects are listed: all of them are.
+- **Search** — Sentry search syntax for the list (`is:unresolved level:error`,
   `is:unresolved !browser.name:Edge`, …).
-- `period` — how recently an issue must have been seen to be listed.
-- `sort` — `date` (last seen), `new` (first seen), `freq` (events) or `user`
-  (users affected).
-- `baseUrl` — for a self-hosted Sentry.
-- `startSessions` — see below; off unless you turn it on.
+- **Seen within** — how recently an issue must have been seen to be listed.
+- **Sort by** — `date` (last seen), `new` (first seen), `freq` (events) or
+  `user` (users affected).
+- **Sentry address** — for a self-hosted Sentry.
 
-`config.json`, `auth.json`, `state.json` and the saved `issues/` are all ignored
-by git: nothing about your account or your errors is ever committed.
+What the extension remembers lives in prifly's database too (`api.state`), not
+in files:
+
+- the organization and sort you pick in the chooser (**Switch organization…**,
+  **Sort by events / last seen**) — a document called `choices`. A pick stands
+  until you change that setting on the Extensions page; a setting changed after
+  a pick wins over it;
+- which session was started from which issue, and which folder each project's
+  sessions were last started in — a document called `state`. A `state.json`
+  left by an earlier version is imported into it once, the first time it is
+  missing, and the file is never read or written again; you can delete it.
+
+A prifly too old to keep settings or state is told so once in the log
+(`needs_newer_prifly`); the extension then runs on the default settings and
+remembers links and picks only until it stops. It never falls back to files.
+
+`auth.json` (the token pasted into the chooser) and the saved `issues/` are
+the only files it writes, both ignored by git: nothing about your account or
+your errors is ever committed.
 
 ## Starting sessions by itself
 
@@ -157,11 +149,7 @@ With it turned on, each new error nobody works on becomes a session without
 a click. Turn it on in prifly's Extensions page: unfold "Sentry issues" and
 tick **Start sessions by itself**, with the **Levels** that count, the
 **Most per day** and **Newest errors only (hours)**. A prifly without
-extension settings reads the same from `config.json` instead:
-
-```json
-"startSessions": { "enabled": true, "levels": ["fatal", "error"], "maxPerDay": 10, "maxAgeHours": 24 }
-```
+extension settings leaves it off.
 
 On every refresh, each open issue whose level is in `levels` and that no
 session carries yet is started, oldest first seen first, at most three a
@@ -216,7 +204,7 @@ is not started: the New session form would have asked for the folder.
 ## How an issue finds its session
 
 prifly hands the extension the id of the session a launch became, and the pair
-is kept in `state.json`. An issue therefore belongs to the session that was
+is kept in prifly's database (`api.state`). An issue therefore belongs to the session that was
 started from it.
 
 ## Working on it
