@@ -25,6 +25,10 @@ type Fake = {
   asked: { name: string; request: VaultFileRequest }[];
   forgot: string[];
   logs: string[];
+  /** The level the reader files at; anything but 1 makes `read` answer null. */
+  level: 1 | 2 | 4;
+  /** While set, the card stays open until it resolves. */
+  gate: Promise<void> | null;
 };
 
 /**
@@ -38,6 +42,8 @@ function fakeVault(answer: VaultFileResult["outcome"] = "accepted"): Fake {
     asked: [],
     forgot: [],
     logs: [],
+    level: 1,
+    gate: null,
   };
   fake.api = {
     features: ["state", "vault-file"],
@@ -45,12 +51,13 @@ function fakeVault(answer: VaultFileResult["outcome"] = "accepted"): Fake {
       fake.logs.push(`${event} ${JSON.stringify(fields ?? {})}`);
     },
     vault: {
-      read: async (name) => fake.entries.get(name) ?? null,
+      read: async (name) => (fake.level === 1 ? (fake.entries.get(name) ?? null) : null),
       file: async (name, request) => {
         fake.asked.push({ name, request });
+        await fake.gate;
         if (answer === "accepted") {
           fake.entries.set(name, request.token);
-          return { outcome: "accepted", level: 1 };
+          return { outcome: "accepted", level: fake.level };
         }
         if (answer === "refused") return { outcome: "refused", message: "no" };
         return { outcome: answer };
@@ -264,5 +271,89 @@ describe("logging out", () => {
     await writeAuth(TOKEN);
     expect(await moveToVault(fake.api, folder, BASE)).toBe("declined");
     expect(fake.asked).toHaveLength(2);
+  });
+});
+
+describe("a level the extension cannot read", () => {
+  test("login accepted at level 2 is not reported as logged in, and the entry is forgotten", async () => {
+    const fake = fakeVault();
+    fake.level = 2;
+    const saved = await saveLogin(fake.api, folder, TOKEN, "me", BASE);
+    expect(saved.saved).toBe(false);
+    expect(fake.forgot).toEqual(["sentry"]);
+    expect(await hasFile("auth.json")).toBe(false);
+  });
+
+  test("a move accepted at level 4 keeps auth.json, which stays the login, and is not asked again", async () => {
+    const fake = fakeVault();
+    fake.level = 4;
+    await writeAuth(OLD);
+    expect(await moveToVault(fake.api, folder, BASE)).toBe("unreadable level");
+    expect(await hasFile("auth.json")).toBe(true);
+    expect((await findLogin(folder, {}, noClirc, fake.api))?.token).toBe(OLD);
+    expect(await moveToVault(fake.api, folder, BASE)).toBe("already declined");
+  });
+});
+
+describe("a card left open while the reader logs in or out", () => {
+  function hold(fake: Fake): () => void {
+    let release = () => {};
+    fake.gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return release;
+  }
+
+  test("logout during a pending move: the late accept is taken back and nothing is logged in", async () => {
+    const fake = fakeVault();
+    const release = hold(fake);
+    await writeAuth(OLD);
+    const moving = moveToVault(fake.api, folder, BASE);
+    await Bun.sleep(5);
+    await removeLogin(fake.api, folder);
+    release();
+    expect(await moving).toBe("superseded");
+    expect(fake.entries.size).toBe(0);
+    expect(await hasFile("auth.json")).toBe(false);
+    expect(await findLogin(folder, {}, noClirc, fake.api)).toBeNull();
+  });
+
+  test("login during a pending move is refused until the card is answered", async () => {
+    const fake = fakeVault();
+    const release = hold(fake);
+    await writeAuth(OLD);
+    const moving = moveToVault(fake.api, folder, BASE);
+    await Bun.sleep(5);
+    const saved = await saveLogin(fake.api, folder, TOKEN, "me", BASE);
+    expect(saved.saved).toBe(false);
+    expect(fake.asked).toHaveLength(1);
+    release();
+    expect(await moving).toBe("moved");
+    expect(fake.entries.get("sentry")).toBe(OLD);
+  });
+
+  test("logout while the login card is open: the late accept is taken back", async () => {
+    const fake = fakeVault();
+    const release = hold(fake);
+    const saving = saveLogin(fake.api, folder, TOKEN, "me", BASE);
+    await Bun.sleep(5);
+    await removeLogin(fake.api, folder);
+    release();
+    expect((await saving).saved).toBe(false);
+    expect(fake.entries.size).toBe(0);
+  });
+
+  test("a vault that throws on forget does not stop logout from deleting auth.json", async () => {
+    const fake = fakeVault();
+    await writeAuth(OLD);
+    fake.api.vault = {
+      read: async () => null,
+      file: async () => ({ outcome: "declined" }),
+      forget: async () => {
+        throw new Error("vault locked");
+      },
+    };
+    await removeLogin(fake.api, folder);
+    expect(await hasFile("auth.json")).toBe(false);
   });
 });

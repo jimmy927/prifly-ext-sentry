@@ -213,15 +213,37 @@ export async function saveLogin(
   if (!canFileToVault(api)) {
     await writeLogin(folder, token, user);
     await clearDeclined(folder);
+    generation += 1;
     return { saved: true, source: "auth.json" };
   }
-  const answer = await api.vault?.file?.(VAULT_ENTRY, {
-    token,
-    label: labelOf(user),
-    host: hostOf(baseUrl),
-    why: "Your Sentry issues in prifly: the token you just pasted into the Sentry chooser",
-  });
+  if (cardOpen) {
+    return { saved: false, reason: "Answer prifly's vault card first, then log in again." };
+  }
+  const before = generation;
+  const answer = await ask(() =>
+    api.vault?.file?.(VAULT_ENTRY, {
+      token,
+      label: labelOf(user),
+      host: hostOf(baseUrl),
+      why: "Your Sentry issues in prifly: the token you just pasted into the Sentry chooser",
+    }),
+  );
   if (answer?.outcome === "accepted") {
+    if (generation !== before) {
+      // Logged out while the card was open: the reader's last word was "out".
+      await forgetQuietly(api);
+      return { saved: false, reason: "You logged out while the vault card was open." };
+    }
+    if ((await readVault(api)) === null) {
+      // Filed at level 2 or 4, which an extension cannot read: it would be logged out at the next start.
+      await forgetQuietly(api);
+      return {
+        saved: false,
+        reason:
+          "The token was filed at a level this extension cannot read. Log in again and keep it at level 1.",
+      };
+    }
+    generation += 1;
     await forgetLogin(folder);
     await clearDeclined(folder);
     return { saved: true, source: "prifly vault" };
@@ -241,9 +263,35 @@ export async function saveLogin(
 
 /** Log out: forget the vault entry this extension filed, and delete `auth.json`. */
 export async function removeLogin(api: LoginApi, folder: string): Promise<void> {
-  if (canFileToVault(api)) await api.vault?.forget?.(VAULT_ENTRY);
+  generation += 1;
   await forgetLogin(folder);
   await clearDeclined(folder);
+  if (canFileToVault(api)) await forgetQuietly(api);
+}
+
+/** Counts logins and logouts, so a card answered after one knows it is out of date. */
+let generation = 0;
+/** Whether a vault card of ours is waiting for the reader. */
+let cardOpen = false;
+
+async function ask<T>(show: () => Promise<T> | undefined): Promise<T | undefined> {
+  cardOpen = true;
+  try {
+    return await show();
+  } finally {
+    cardOpen = false;
+  }
+}
+
+/** `forget`, with a failure said in the log (without a token) rather than thrown. */
+async function forgetQuietly(api: LoginApi): Promise<void> {
+  try {
+    await api.vault?.forget?.(VAULT_ENTRY);
+  } catch (caught) {
+    api.log("vault_forget_failed", {
+      message: caught instanceof Error ? caught.message : "failed",
+    });
+  }
 }
 
 /** What `moveToVault` did, for the log. */
@@ -254,7 +302,9 @@ export type MoveOutcome =
   | "unavailable"
   | "nothing to move"
   | "already declined"
-  | "vault has one";
+  | "vault has one"
+  | "unreadable level"
+  | "superseded";
 
 /**
  * The one-time move: on a prifly with "vault-file", a token in `auth.json`
@@ -274,13 +324,27 @@ export async function moveToVault(
   if (saved === null) return "nothing to move";
   if (await wasDeclined(folder)) return "already declined";
   if ((await readVault(api)) !== null) return "vault has one";
-  const answer = await api.vault?.file?.(VAULT_ENTRY, {
-    token: saved.token,
-    label: labelOf(saved.user),
-    host: hostOf(baseUrl),
-    why: "Moves the Sentry token from auth.json in the extension's folder into the vault, so it travels with prifly's data",
-  });
+  if (cardOpen) return "unanswered";
+  const before = generation;
+  const answer = await ask(() =>
+    api.vault?.file?.(VAULT_ENTRY, {
+      token: saved.token,
+      label: labelOf(saved.user),
+      host: hostOf(baseUrl),
+      why: "Moves the Sentry token from auth.json in the extension's folder into the vault, so it travels with prifly's data",
+    }),
+  );
   if (answer?.outcome === "accepted") {
+    if (generation !== before) {
+      // Logged out (or in) while the card was open: that is the newer word.
+      await forgetQuietly(api);
+      return "superseded";
+    }
+    if ((await readVault(api)) === null) {
+      // Filed at level 2 or 4: unreadable here, so auth.json stays the login.
+      await markDeclined(folder);
+      return "unreadable level";
+    }
     await forgetLogin(folder);
     return "moved";
   }
