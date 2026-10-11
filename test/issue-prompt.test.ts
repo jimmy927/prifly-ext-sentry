@@ -22,6 +22,8 @@ describe("the sentry skill's flags", () => {
     });
     expect(text).toContain("`--org morpheus-0r --base-url https://sentry.example.com`");
     expect(prompt(null)).not.toContain("--org");
+    const odd = issuePrompt({ issue, event: null, folder: "/f", files: [], now: NOW, org: "a b" });
+    expect(odd).toContain("`--org 'a b'`");
   });
 });
 

@@ -1,4 +1,4 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,8 +15,13 @@ import {
 } from "../world";
 
 // effectiveConfig reads the environment; these tests mean a machine without it.
+const savedEnv = { org: Bun.env["SENTRY_ORG"], url: Bun.env["SENTRY_URL"] };
 delete Bun.env["SENTRY_ORG"];
 delete Bun.env["SENTRY_URL"];
+afterAll(() => {
+  if (savedEnv.org !== undefined) Bun.env["SENTRY_ORG"] = savedEnv.org;
+  if (savedEnv.url !== undefined) Bun.env["SENTRY_URL"] = savedEnv.url;
+});
 
 const clirc = { token: "", org: "", url: "" };
 const atDefaults: Record<string, string | number> = { ...SETTING_DEFAULTS };

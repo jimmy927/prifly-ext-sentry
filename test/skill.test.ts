@@ -1,14 +1,20 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 const skillDir = join(import.meta.dir, "..", "skills", "sentry");
 
 /** Runs `sentry.settings(None, json.loads(${JSON.stringify(JSON.stringify(base))}))` of the skill's script with the given database and environment. */
-function settings(env: Record<string, string>, seed: string | null, base: string | null = null) {
+function settings(
+  env: Record<string, string>,
+  seed: string | null,
+  base: string | null = null,
+  rc: string | null = null,
+) {
   const dir = mkdtempSync(join(tmpdir(), "sentry-skill-"));
   const db = join(dir, "prifly.db");
+  if (rc !== null) writeFileSync(join(dir, ".sentryclirc"), rc);
   const script = `
 import sqlite3, sys, json
 sys.path.insert(0, ${JSON.stringify(skillDir)})
@@ -51,6 +57,16 @@ describe("the sentry skill's organization", () => {
     expect(
       JSON.parse(settings({ SENTRY_URL: "https://env.io" }, row, "https://flag.io").out),
     ).toEqual(["https://flag.io/api/0", "t", "o"]);
+  });
+
+  test("the default address in the row leaves ~/.sentryclirc's url in charge", () => {
+    const row = JSON.stringify({ org: "o", baseUrl: "https://sentry.io" });
+    const rc = "[defaults]\nurl=https://self.example\n";
+    expect(JSON.parse(settings({}, row, null, rc).out)).toEqual([
+      "https://self.example/api/0",
+      "t",
+      "o",
+    ]);
   });
 
   test("an empty value, a missing row or database falls through", () => {

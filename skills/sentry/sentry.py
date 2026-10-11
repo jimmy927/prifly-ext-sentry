@@ -69,6 +69,12 @@ def prifly_setting(field: str) -> str:
     return found.strip() if isinstance(found, str) else ""
 
 
+def db_base_url() -> str:
+    """prifly's Sentry address setting; its default (sentry.io) counts as unset, so ~/.sentryclirc's url still applies."""
+    found = prifly_setting("baseUrl")
+    return "" if found.rstrip("/") == "https://sentry.io" else found
+
+
 def clirc(section: str, key: str) -> str:
     parser = configparser.ConfigParser()
     try:
@@ -86,7 +92,7 @@ def settings(org_flag: str | None, base_flag: str | None = None) -> tuple[str, s
             "not logged in to Sentry: open prifly, click 'From a Sentry issue…' and log in "
             "(or set SENTRY_AUTH_TOKEN, or run `sentry-cli login`)"
         )
-    base = base_flag or os.environ.get("SENTRY_URL") or prifly_setting("baseUrl") or clirc("defaults", "url")
+    base = base_flag or os.environ.get("SENTRY_URL") or db_base_url() or clirc("defaults", "url")
     org = org_flag or os.environ.get("SENTRY_ORG") or prifly_setting("org") or clirc("defaults", "org")
     if not org:
         sys.exit("no Sentry organization: pass --org, or choose it in prifly's Extensions dialog (Sentry issues), or set SENTRY_ORG, or put it in ~/.sentryclirc")

@@ -93,12 +93,19 @@ export function issuePrompt(parts: PromptParts): string {
 /** What the sentry skill needs to reach the same organization and server as this extension. */
 function skillFlags(parts: PromptParts): string {
   const flags = [
-    parts.org === undefined || parts.org === "" ? "" : `--org ${parts.org}`,
-    parts.baseUrl === undefined || parts.baseUrl === "" ? "" : `--base-url ${parts.baseUrl}`,
+    parts.org === undefined || parts.org === "" ? "" : `--org ${shellWord(parts.org)}`,
+    parts.baseUrl === undefined || parts.baseUrl === ""
+      ? ""
+      : `--base-url ${shellWord(parts.baseUrl)}`,
   ].filter((flag) => flag !== "");
   return flags.length === 0
     ? ""
     : `When you use the sentry skill's script for this issue, pass \`${flags.join(" ")}\` before the subcommand.`;
+}
+
+/** A value as one shell word: plain ones as they are, anything else in single quotes. */
+function shellWord(value: string): string {
+  return /^[\w.:/@-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
 }
 
 function section(heading: string, body: string): string {
