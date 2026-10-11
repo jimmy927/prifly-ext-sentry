@@ -54,6 +54,7 @@ import { isSetupKey, runSetup, setupChoices, setupTail } from "./setup";
 import { shortDate } from "./time";
 import {
   applySettings,
+  changeState,
   checkoutOf,
   creds,
   linkIssue,
@@ -62,7 +63,6 @@ import {
   reload,
   unlinkIssue,
   type World,
-  writeState,
 } from "./world";
 
 let world: World | null = null;
@@ -89,8 +89,8 @@ export async function activate(api: ExtensionApi): Promise<() => void> {
   let timer = setInterval(() => {
     if (!stopped) void tick();
   }, every * 1000);
-  // Where prifly keeps settings, the Extensions page decides (over config.json,
-  // `settings.ts`); the list is read again with whatever the reader changed.
+  // Where prifly keeps settings, the Extensions page decides (`settings.ts`);
+  // the list is read again with whatever the reader changed.
   if (hasSettings(api)) {
     api.onSettings?.(() => {
       const at = world;
@@ -194,7 +194,10 @@ export function handledIssues(at: World): Set<string> {
 export async function startNew(at: World, now: number): Promise<void> {
   const start = starter(at.api);
   if (start === undefined || !at.config.startSessions.enabled) return;
-  at.state.attempted = recentAttempts(at.state.attempted, now);
+  const prune = (state: World["state"]) => {
+    state.attempted = recentAttempts(state.attempted, now);
+  };
+  prune(at.state);
   const due = issuesToStart(
     at.issues,
     handledIssues(at),
@@ -204,14 +207,19 @@ export async function startNew(at: World, now: number): Promise<void> {
   );
   for (const issue of due) {
     // Kept before asking, so a poll that overlaps this one does not ask again.
-    at.state.attempted[issue.id] = { at: now, started: false };
+    await changeState(at, (state) => {
+      prune(state);
+      state.attempted[issue.id] = { at: now, started: false };
+    });
     let answer: StartAnswer;
     try {
       answer = await start("issue", issue.id);
     } catch (caught) {
       answer = { started: false, reason: message(caught) };
     }
-    at.state.attempted[issue.id] = { at: now, started: answer.started };
+    await changeState(at, (state) => {
+      state.attempted[issue.id] = { at: now, started: answer.started };
+    });
     at.api.log("auto_start", {
       issue: issue.shortId,
       started: answer.started,
@@ -219,7 +227,6 @@ export async function startNew(at: World, now: number): Promise<void> {
       reason: answer.started ? null : answer.reason,
     });
   }
-  if (due.length > 0) await writeState(at.api.folder, at.state);
 }
 
 /**
@@ -416,7 +423,15 @@ async function issueLaunch(at: World, key: string): Promise<Launch> {
     cwd: checkout.folder,
   });
   const seeded: Launch = {
-    prompt: issuePrompt({ issue, event, folder, files, now: Date.now() }),
+    prompt: issuePrompt({
+      issue,
+      event,
+      folder,
+      files,
+      now: Date.now(),
+      org: at.config.org,
+      baseUrl: at.config.baseUrl,
+    }),
     name: clip(issue.title, 60),
   };
   // Found nowhere, the New session form asks, and `launched` remembers the answer.
@@ -440,12 +455,13 @@ export function safeName(name: string): string {
  */
 export async function launched(_launchId: string, key: string, sessionId: string): Promise<void> {
   const at = here();
-  linkIssue(at.state, sessionId, key);
   const issue = at.issues.find((entry) => entry.id === key) ?? at.linked.get(key);
   const cwd = at.api.sessions().find((session) => session.id === sessionId)?.cwd ?? "";
   const top = cwd === "" ? "" : mainCheckout(cwd);
-  if (issue !== undefined && top !== "") at.state.folders[issue.project] = top;
-  await writeState(at.api.folder, at.state);
+  await changeState(at, (state) => {
+    linkIssue(state, sessionId, key);
+    if (issue !== undefined && top !== "") state.folders[issue.project] = top;
+  });
   if (issue !== undefined) at.linked.set(key, issue);
   show();
 }
@@ -490,8 +506,7 @@ export async function action(
  * share a cause, like a failed backup step and the failed upload behind it.
  */
 async function link(at: World, key: string, sessionId: string): Promise<string> {
-  linkIssue(at.state, sessionId, key);
-  await writeState(at.api.folder, at.state);
+  await changeState(at, (state) => linkIssue(state, sessionId, key));
   const issue = at.issues.find((entry) => entry.id === key) ?? at.linked.get(key);
   if (issue !== undefined) at.linked.set(key, issue);
   show();
@@ -509,8 +524,7 @@ function unlinkAction(sessionId: string): DecorationAction {
 
 /** A link made by mistake, undone from the chip: the issue itself is left alone in Sentry. */
 async function unlink(at: World, key: string, sessionId: string): Promise<string> {
-  unlinkIssue(at.state, sessionId, key);
-  await writeState(at.api.folder, at.state);
+  await changeState(at, (state) => unlinkIssue(state, sessionId, key));
   show();
   at.api.log("unlinked", { issue: key, session: sessionId.slice(0, 8) });
   const issue = at.linked.get(key) ?? at.issues.find((entry) => entry.id === key);

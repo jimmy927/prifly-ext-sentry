@@ -105,7 +105,7 @@ describe("finding a project's checkout", () => {
     expect(checkoutFor("shop", shop, clues).folder).toBe(join(home, "deep", "away", "shop"));
   });
 
-  test("a folder pinned in config.json, then one remembered, win over everything found", () => {
+  test("a folder pinned in the settings, then one remembered, win over everything found", () => {
     const pinned = { ...none, pinned: { odi: "/pinned" }, remembered: { odi: home } };
     expect(checkoutFor("odi", odi, pinned).folder).toBe("/pinned");
     expect(checkoutFor("odi", odi, { ...none, remembered: { odi: home } }).folder).toBe(home);

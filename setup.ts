@@ -22,7 +22,7 @@ import {
 import { openBrowser } from "./open-browser";
 import type { Launch, LaunchChoice } from "./prifly-api";
 import { organizations, whoami } from "./sentry";
-import { chooseInFile, creds, type World } from "./world";
+import { choose, creds, type World } from "./world";
 
 const KEYS = {
   open: "setup:open-token-page",
@@ -176,14 +176,14 @@ async function saveToken(world: World, input: string): Promise<Launch> {
 }
 
 async function chooseOrg(world: World, slug: string): Promise<Launch> {
-  await chooseInFile(world, { org: slug });
+  await choose(world, { org: slug });
   world.api.log("org_chosen", { org: slug });
   return { prompt: "", message: `Showing every project in ${slug}.` };
 }
 
-/** Projects belong to an organization, so any folder pinned to one goes with it. */
+/** Back to the organization list. (Folders pinned in the Project folders setting stay: the Extensions page owns them.) */
 async function switchOrg(world: World): Promise<Launch> {
-  await chooseInFile(world, { org: "", projects: {} });
+  await choose(world, { org: "" });
   world.issues = [];
   world.mappings = [];
   world.loadedAt = 0;
@@ -191,7 +191,7 @@ async function switchOrg(world: World): Promise<Launch> {
 }
 
 async function toggleSort(world: World): Promise<Launch> {
-  await chooseInFile(world, { sort: world.config.sort === "freq" ? "date" : "freq" });
+  await choose(world, { sort: world.config.sort === "freq" ? "date" : "freq" });
   world.issues = [];
   world.loadedAt = 0;
   return { prompt: "", message: `Sorted by ${SORT_NAMES[world.config.sort]}.` };

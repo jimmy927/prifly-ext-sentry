@@ -26,7 +26,7 @@ function fakeWorld(): World {
   return {
     api,
     config,
-    file: { ...config },
+    choices: {},
     login: null,
     state: { links: {}, folders: {}, linkedAt: {}, attempted: {} },
     issues: [],

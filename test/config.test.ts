@@ -18,7 +18,7 @@ import { NOW, rawIssue } from "./fixtures";
 const noClirc = { token: "", org: "", url: "" };
 
 describe("parseConfig", () => {
-  test("an empty file gives the defaults", () => {
+  test("empty settings give the defaults", () => {
     expect(parseConfig({}, {}, noClirc, "/home/me")).toEqual({
       org: "",
       baseUrl: "https://sentry.io",
@@ -86,7 +86,7 @@ describe("parseState", () => {
     ).toEqual({ a: { at: 5, started: true } });
   });
 
-  test("reads a one-issue link from an older state.json as a list of one", () => {
+  test("reads a one-issue link from older state as a list of one", () => {
     expect(parseState({ links: { s1: "5001" } }).links).toEqual({ s1: ["5001"] });
   });
 });

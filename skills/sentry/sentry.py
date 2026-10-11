@@ -6,8 +6,9 @@ event, list an issue's events, and resolve / archive / reopen an issue.
 Credentials, in order: SENTRY_AUTH_TOKEN; the prifly Sentry extension's
 auth.json (the token the reader pasted into prifly's "From a Sentry issue…");
 ~/.sentryclirc's [auth] token (what `sentry-cli login` writes). The
-organization: --org, SENTRY_ORG, the extension's config.json, then
-~/.sentryclirc's [defaults] org. Standard library only.
+organization and address: --org / --base-url, SENTRY_ORG / SENTRY_URL, then the
+Sentry extension's settings in prifly's database (read-only), then
+~/.sentryclirc's [defaults]. Standard library only.
 """
 
 from __future__ import annotations
@@ -17,6 +18,7 @@ import configparser
 import json
 import os
 import re
+import sqlite3
 import sys
 import urllib.error
 import urllib.parse
@@ -47,6 +49,32 @@ def read_json(name: str, field: str) -> str:
     return ""
 
 
+def prifly_setting(field: str) -> str:
+    """A text setting of the prifly Sentry extension, read from prifly's database.
+
+    Read-only; any failure (no file, locked, no row, bad JSON) gives "".
+    """
+    db = os.environ.get("PRIFLY_DB") or str(HOME / ".local/share/prifly/prifly.db")
+    try:
+        con = sqlite3.connect(f"file:{urllib.parse.quote(db)}?mode=ro", uri=True, timeout=1)
+        try:
+            row = con.execute(
+                "select value from settings where key = 'prifly.extensions.settings.sentry'"
+            ).fetchone()
+        finally:
+            con.close()
+        found = json.loads(row[0]).get(field) if row else None
+    except (sqlite3.Error, ValueError, AttributeError, TypeError):
+        return ""
+    return found.strip() if isinstance(found, str) else ""
+
+
+def db_base_url() -> str:
+    """prifly's Sentry address setting; its default (sentry.io) counts as unset, so ~/.sentryclirc's url still applies."""
+    found = prifly_setting("baseUrl")
+    return "" if found.rstrip("/") == "https://sentry.io" else found
+
+
 def clirc(section: str, key: str) -> str:
     parser = configparser.ConfigParser()
     try:
@@ -56,7 +84,7 @@ def clirc(section: str, key: str) -> str:
         return ""
 
 
-def settings(org_flag: str | None) -> tuple[str, str, str]:
+def settings(org_flag: str | None, base_flag: str | None = None) -> tuple[str, str, str]:
     """The API root, the token and the organization."""
     token = os.environ.get("SENTRY_AUTH_TOKEN") or read_json("auth.json", "token") or clirc("auth", "token")
     if not token:
@@ -64,10 +92,10 @@ def settings(org_flag: str | None) -> tuple[str, str, str]:
             "not logged in to Sentry: open prifly, click 'From a Sentry issue…' and log in "
             "(or set SENTRY_AUTH_TOKEN, or run `sentry-cli login`)"
         )
-    base = os.environ.get("SENTRY_URL") or read_json("config.json", "baseUrl") or clirc("defaults", "url")
-    org = org_flag or os.environ.get("SENTRY_ORG") or read_json("config.json", "org") or clirc("defaults", "org")
+    base = base_flag or os.environ.get("SENTRY_URL") or db_base_url() or clirc("defaults", "url")
+    org = org_flag or os.environ.get("SENTRY_ORG") or prifly_setting("org") or clirc("defaults", "org")
     if not org:
-        sys.exit("no Sentry organization: pass --org, or choose one in prifly's 'From a Sentry issue…'")
+        sys.exit("no Sentry organization: pass --org, or choose it in prifly's Extensions dialog (Sentry issues), or set SENTRY_ORG, or put it in ~/.sentryclirc")
     return (base or "https://sentry.io").rstrip("/") + "/api/0", token, org
 
 
@@ -250,6 +278,7 @@ def cmd_status(api: Api, a: argparse.Namespace) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(prog="sentry.py", description=__doc__)
     p.add_argument("--org")
+    p.add_argument("--base-url", dest="base_url", help="the Sentry address (self-hosted)")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("search", help="search issues (Sentry search syntax; is:unresolved unless an is: is given)")
     s.add_argument("query", nargs="*")
@@ -274,7 +303,7 @@ def main() -> None:
         w = sub.add_parser(name, help=f"{name} an issue (a write: only when the user asked for it)")
         w.add_argument("issue")
     a = p.parse_args()
-    api = Api(*settings(a.org))
+    api = Api(*settings(a.org, a.base_url))
     handlers = {"search": cmd_search, "issue": cmd_issue, "event": cmd_event, "events": cmd_events}
     handlers.get(a.cmd, cmd_status)(api, a)
 

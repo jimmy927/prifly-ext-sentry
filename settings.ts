@@ -1,17 +1,10 @@
 /**
- * The plain settings, from prifly's Extensions page where prifly keeps
- * extension settings (`prifly-extension.json` declares them), over what
- * `config.json` holds.
- *
- * An extension cannot write its settings (`api.settings` is read-only; only
- * the Extensions page sets one), so `config.json` is never imported into
- * them. Instead, per key: a setting that is not at its default wins; a
- * setting still at its default lets `config.json`'s value through. A prifly
- * without settings never gets here and reads `config.json` alone.
+ * The plain settings, from prifly's Extensions page (`prifly-extension.json`
+ * declares them) and nowhere else. An extension cannot write its settings
+ * (`api.settings` is read-only; only the Extensions page sets one).
  */
 
 import type { SettingValue } from "./prifly-api";
-import { obj } from "./read";
 
 /** The manifest's defaults for the settings below; a test keeps the two in step. */
 export const SETTING_DEFAULTS = {
@@ -24,10 +17,7 @@ export const SETTING_DEFAULTS = {
   refreshSeconds: 120,
 } as const;
 
-type Values = Readonly<Record<string, SettingValue>>;
-
-/** The string keys that are one text each; `config.json` calls them by the same name. */
-const TEXT_KEYS = ["org", "baseUrl", "period", "sort"] as const;
+export type Values = Readonly<Record<string, SettingValue>>;
 
 /**
  * `slug=folder` pairs, separated by `;` or line breaks. A pair splits at its
@@ -52,88 +42,29 @@ export function parseProjectFolders(text: unknown): Record<string, string> {
   return folders;
 }
 
-/** What the reader typed for a text setting, or null while it is empty or at its default. */
-function chosen(values: Values, key: keyof typeof SETTING_DEFAULTS): string | null {
-  const value = values[key];
-  if (typeof value !== "string") return null;
-  const text = value.trim();
-  return text === "" || text === SETTING_DEFAULTS[key] ? null : text;
-}
-
-function chosenRefresh(values: Values): number | null {
-  const value = values["refreshSeconds"];
-  return typeof value === "number" &&
-    Number.isFinite(value) &&
-    value !== SETTING_DEFAULTS.refreshSeconds
-    ? value
-    : null;
-}
-
-/** The query is the one text where "" means something (every issue): only the default is unset. */
-function chosenQuery(values: Values): string | null {
-  const value = values["query"];
-  return typeof value === "string" && value.trim() !== SETTING_DEFAULTS.query ? value.trim() : null;
-}
-
 /**
- * `config.json`'s contents with the settings laid over them, ready for
- * `parseConfig`: each setting not at its default replaces that key, and the
- * `projectFolders` pairs replace the file's folders for the same slugs.
+ * The settings as the plain object `parseConfig` reads, which fills in the
+ * defaults for what is empty or mistyped. The `projectFolders` pairs become
+ * `projects`.
  */
-export function overlaySettings(fileRaw: unknown, values: Values): Record<string, unknown> {
-  const merged: Record<string, unknown> = { ...obj(fileRaw) };
-  for (const key of TEXT_KEYS) {
-    const text = chosen(values, key);
-    if (text !== null) merged[key] = text;
-  }
-  const query = chosenQuery(values);
-  if (query !== null) merged["query"] = query;
-  const refresh = chosenRefresh(values);
-  if (refresh !== null) merged["refreshSeconds"] = refresh;
-  const pinned = parseProjectFolders(values["projectFolders"]);
-  if (Object.keys(pinned).length > 0) {
-    merged["projects"] = { ...obj(merged["projects"]), ...pinned };
-  }
-  return merged;
+export function settingsRaw(values: Values): Record<string, unknown> {
+  return {
+    org: unlessDefault("org", values),
+    baseUrl: unlessDefault("baseUrl", values),
+    period: text(values["period"]),
+    sort: text(values["sort"]),
+    query: text(values["query"]),
+    refreshSeconds: values["refreshSeconds"],
+    projects: parseProjectFolders(values["projectFolders"]),
+  };
 }
 
-/**
- * The keys where `config.json` is what takes effect because the setting is
- * still at its default: what the reader should enter in the Extensions dialog
- * before `config.json` can be forgotten. Empty when nothing depends on the file.
- */
-export function fileOnlyKeys(fileRaw: unknown, values: Values): string[] {
-  const file = obj(fileRaw);
-  const keys: string[] = [];
-  for (const key of TEXT_KEYS) {
-    const inFile = file[key];
-    if (
-      chosen(values, key) === null &&
-      typeof inFile === "string" &&
-      inFile.trim() !== "" &&
-      inFile.trim() !== SETTING_DEFAULTS[key]
-    ) {
-      keys.push(key);
-    }
-  }
-  const query = file["query"];
-  if (
-    chosenQuery(values) === null &&
-    typeof query === "string" &&
-    query !== SETTING_DEFAULTS.query
-  ) {
-    keys.push("query");
-  }
-  const refresh = file["refreshSeconds"];
-  if (
-    chosenRefresh(values) === null &&
-    typeof refresh === "number" &&
-    refresh !== SETTING_DEFAULTS.refreshSeconds
-  ) {
-    keys.push("refreshSeconds");
-  }
-  const pinned = parseProjectFolders(values["projectFolders"]);
-  const stray = Object.keys(obj(file["projects"])).filter((slug) => !(slug in pinned));
-  if (stray.length > 0) keys.push("projectFolders");
-  return keys;
+/** Empty or still the default means unset, so the environment and ~/.sentryclirc fallbacks apply. */
+function unlessDefault(key: "org" | "baseUrl", values: Values): string | undefined {
+  const value = text(values[key]);
+  return value === "" || value === SETTING_DEFAULTS[key] ? undefined : value;
+}
+
+function text(value: unknown): string | undefined {
+  return typeof value === "string" ? value.trim() : undefined;
 }

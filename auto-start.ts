@@ -38,7 +38,7 @@ export const DEFAULT_START_SESSIONS: StartSessions = {
   maxAgeHours: 24,
 };
 
-/** The `startSessions` block of config.json; missing or mistyped fields take their defaults. */
+/** The auto-start fields read tolerantly; missing or mistyped ones take their defaults. */
 export function parseStartSessions(raw: unknown): StartSessions {
   const block = obj(raw);
   const levels = Array.isArray(block["levels"])
@@ -73,7 +73,7 @@ export function startSessionsFrom(values: Readonly<Record<string, SettingValue>>
   });
 }
 
-/** Whether this prifly keeps the settings, so they come from it rather than config.json. */
+/** Whether this prifly keeps the settings (`api.settings`); without it the defaults apply. */
 export function hasSettings(api: ExtensionApi): boolean {
   return (api.features ?? []).includes("settings") && api.settings !== undefined;
 }
