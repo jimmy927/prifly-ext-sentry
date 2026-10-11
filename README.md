@@ -18,16 +18,19 @@ the same way.
 
 ## Install
 
-Once this repository is on GitHub: in prifly, status bar → the puzzle icon →
-Install from `https://github.com/jimmy927/prifly-ext-sentry`, then tick it to
-enable it.
+In prifly: status bar → the puzzle icon → Install from
+`https://github.com/jimmy927/prifly-ext-sentry`, then tick it to enable it.
 
-Until then, or instead, clone it into prifly's extensions folder and enable it
-from the same puzzle-icon list:
+Or clone it into prifly's extensions folder and enable it from the same
+puzzle-icon list:
 
 ```sh
-git clone /home/jimmy/src/prifly-ext-sentry ~/.local/share/prifly/extensions/prifly-ext-sentry
+git clone https://github.com/jimmy927/prifly-ext-sentry ~/.local/share/prifly/extensions/prifly-ext-sentry
 ```
+
+That is prifly's data folder on Linux and WSL; on macOS it is
+`~/Library/Application Support/prifly/extensions/`, on Windows
+`%LOCALAPPDATA%\prifly\host\extensions\`.
 
 There is nothing to install for it to run — prifly's host imports `index.ts`
 with Bun, and the extension has no runtime dependencies. `bun install` is only
@@ -126,7 +129,7 @@ organization**, **Sentry address**, **Project folders**, **Search**, **Seen
 within**, **Sort by**, **Refresh every** and the auto-start ones below. prifly
 keeps them with its own data, so they move with it to another host. On a
 Windows host, set the project folder once there, as `slug=folder` pairs
-separated by `;` (`odi=C:\Users\you\src\odi`).
+separated by `;` (`shop=C:\Users\you\src\shop`).
 
 - **Project folders** — optional: Sentry project slug → a folder its sessions
   always start in, over whatever is found (`~` is expanded). Usually empty. It
@@ -136,7 +139,29 @@ separated by `;` (`odi=C:\Users\you\src\odi`).
 - **Seen within** — how recently an issue must have been seen to be listed.
 - **Sort by** — `date` (last seen), `new` (first seen), `freq` (events) or
   `user` (users affected).
-- **Sentry address** — for a self-hosted Sentry.
+- **Sentry address** (Base URL) — only for a self-hosted Sentry: set it here
+  **before** you log in, and the extension uses it for everything. Leave it at
+  `https://sentry.io` for Sentry's hosted service.
+
+### Data regions (EU and US)
+
+Sentry's hosted service keeps each organization in a data region: EU
+organizations are on `https://de.sentry.io`, US ones on `https://us.sentry.io`.
+When you pick an organization, the extension reads its region from Sentry's
+organization list (`links.regionUrl`), keeps it in prifly's database beside the
+choice, and sends that organization's requests there. An organization picked
+before this was kept, or set on the Extensions page, is looked up once and
+stored. Nothing needs setting. A **Sentry address** other than `sentry.io` (a
+self-hosted Sentry) always wins over the region, and links to issues open at the
+address Sentry itself gives for them.
+
+The `sentry` skill uses the same region: a session started from an issue passes
+it as `--base-url`, and the script on its own reads the stored one from prifly's
+database (`extension_state`, document `choices`). It finds that database at
+`$PRIFLY_DB`, else in prifly's data folder: `$XDG_DATA_HOME/prifly` or
+`~/.local/share/prifly` (Linux, WSL), `~/Library/Application Support/prifly`
+(macOS), `%LOCALAPPDATA%\prifly\host` (Windows). Run natively on Windows, the
+skill needs Python 3 there; run inside WSL it reads the WSL copy.
 
 What the extension remembers lives in prifly's database too (`api.state`), not
 in files:

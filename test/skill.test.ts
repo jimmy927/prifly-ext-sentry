@@ -103,3 +103,95 @@ describe("the sentry skill's organization", () => {
     ]);
   });
 });
+
+/** Runs a Python expression with the skill's module imported as `sentry`. */
+function py(expression: string, env: Record<string, string> = {}) {
+  const script = `
+import sys, json
+sys.path.insert(0, ${JSON.stringify(skillDir)})
+import sentry
+print(json.dumps(${expression}))
+`;
+  const run = Bun.spawnSync(["python3", "-c", script], {
+    env: { PATH: Bun.env["PATH"] ?? "", ...env },
+  });
+  return { out: run.stdout.toString().trim(), err: run.stderr.toString() };
+}
+
+describe("where the skill looks for prifly's database", () => {
+  const db = (platform: string, env: Record<string, string>, home: string) =>
+    JSON.parse(
+      py(
+        `sentry.prifly_db(${JSON.stringify(platform)}, json.loads(${JSON.stringify(JSON.stringify(env))}), ${JSON.stringify(home)})`,
+      ).out,
+    );
+
+  test("Linux and WSL: XDG_DATA_HOME, else ~/.local/share", () => {
+    expect(db("linux", {}, "/home/ann")).toBe("/home/ann/.local/share/prifly/prifly.db");
+    expect(db("linux", { XDG_DATA_HOME: "/data" }, "/home/ann")).toBe("/data/prifly/prifly.db");
+    expect(db("linux", { XDG_DATA_HOME: "" }, "/home/ann")).toBe(
+      "/home/ann/.local/share/prifly/prifly.db",
+    );
+  });
+
+  test("macOS: Application Support", () => {
+    expect(db("darwin", {}, "/Users/ann")).toBe(
+      "/Users/ann/Library/Application Support/prifly/prifly.db",
+    );
+  });
+
+  test("Windows: %LOCALAPPDATA%\\prifly\\host, else the profile's AppData\\Local", () => {
+    expect(db("win32", { LOCALAPPDATA: "C:\\Users\\ann\\AppData\\Local" }, "C:\\Users\\ann")).toBe(
+      "C:\\Users\\ann\\AppData\\Local\\prifly\\host\\prifly.db",
+    );
+    expect(db("win32", {}, "C:\\Users\\ann")).toBe(
+      "C:\\Users\\ann\\AppData\\Local\\prifly\\host\\prifly.db",
+    );
+  });
+
+  test("PRIFLY_DB wins on every platform", () => {
+    for (const platform of ["linux", "darwin", "win32"]) {
+      expect(db(platform, { PRIFLY_DB: "/elsewhere/p.db" }, "/home/ann")).toBe("/elsewhere/p.db");
+    }
+  });
+});
+
+describe("the skill and the organization's data region", () => {
+  const seeded = (choices: unknown, env: Record<string, string> = {}) => {
+    const dir = mkdtempSync(join(tmpdir(), "sentry-skill-"));
+    const db = join(dir, "prifly.db");
+    const setup = `
+import sqlite3
+con = sqlite3.connect(${JSON.stringify(db)})
+con.execute("create table settings (key text primary key, value text)")
+con.execute("create table extension_state (extension_id text, name text, value text)")
+con.execute("insert into extension_state values ('sentry', 'choices', ?)", (${JSON.stringify(JSON.stringify(choices))},))
+con.commit(); con.close()
+`;
+    Bun.spawnSync(["python3", "-c", setup]);
+    return JSON.parse(
+      py(`sentry.settings("eu-org", ${env["BASE"] ?? "None"})`, {
+        HOME: dir,
+        PRIFLY_DB: db,
+        SENTRY_AUTH_TOKEN: "t",
+      }).out,
+    );
+  };
+  const choices = { regions: { "eu-org": "https://de.sentry.io/" } };
+
+  test("with the default address the stored region is the API root", () => {
+    expect(seeded(choices)).toEqual(["https://de.sentry.io/api/0", "t", "eu-org"]);
+  });
+
+  test("a self-hosted address or --base-url wins over the stored region", () => {
+    expect(seeded(choices, { BASE: '"https://sentry.corp.example"' })[0]).toBe(
+      "https://sentry.corp.example/api/0",
+    );
+  });
+
+  test("an organization with no stored region stays on sentry.io", () => {
+    expect(seeded({ regions: { other: "https://de.sentry.io" } })[0]).toBe(
+      "https://sentry.io/api/0",
+    );
+  });
+});

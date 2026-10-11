@@ -21,10 +21,12 @@ import {
 } from "./auth";
 import { openBrowser } from "./open-browser";
 import type { Launch, LaunchChoice } from "./prifly-api";
+import { DEFAULT_BASE_URL, ensureRegion } from "./region";
 import { organizations, whoami } from "./sentry";
 import { choose, creds, type World } from "./world";
 
 const KEYS = {
+  hint: "setup:self-hosted-hint",
   open: "setup:open-token-page",
   token: "setup:paste-token",
   org: "setup:org:",
@@ -96,7 +98,21 @@ function loginRows(world: World): LaunchChoice[] {
   const keptIn = canFileToVault(world.api)
     ? "prifly's vault (you confirm on a card)"
     : "this machine only (auth.json, readable by you alone)";
+  const hint: LaunchChoice[] =
+    world.config.baseUrl === DEFAULT_BASE_URL
+      ? [
+          {
+            key: KEYS.hint,
+            title: "Self-hosted Sentry?",
+            group: "Log in",
+            detail:
+              "Set Base URL (“Sentry address”) in prifly's Extensions dialog (Sentry issues) first.",
+            tone: "muted",
+          },
+        ]
+      : [];
   return [
+    ...hint,
     {
       key: KEYS.open,
       title: "1. Open Sentry's auth token page",
@@ -132,6 +148,7 @@ async function orgRows(world: World): Promise<LaunchChoice[]> {
 
 /** Carry out one of those rows. Null when the key is not one of them. */
 export async function runSetup(world: World, key: string, input: string): Promise<Launch | null> {
+  if (key === KEYS.hint) return { prompt: "", message: "" };
   if (key === KEYS.open) return await openTokenPage(world);
   if (key === KEYS.token) return await saveToken(world, input);
   if (key.startsWith(KEYS.org)) return await chooseOrg(world, key.slice(KEYS.org.length));
@@ -177,6 +194,8 @@ async function saveToken(world: World, input: string): Promise<Launch> {
 
 async function chooseOrg(world: World, slug: string): Promise<Launch> {
   await choose(world, { org: slug });
+  // Which data region hosts it (EU organizations are on de.sentry.io): kept with the choice.
+  await ensureRegion(world);
   world.api.log("org_chosen", { org: slug });
   return { prompt: "", message: `Showing every project in ${slug}.` };
 }

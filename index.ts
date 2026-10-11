@@ -40,6 +40,7 @@ import type {
   StartAnswer,
 } from "./prifly-api";
 import { clip } from "./read";
+import { apiBase, orgCreds } from "./region";
 import {
   type Creds,
   type Issue,
@@ -56,7 +57,6 @@ import {
   applySettings,
   changeState,
   checkoutOf,
-  creds,
   linkIssue,
   load,
   ready,
@@ -338,7 +338,7 @@ export function matches(issue: Issue, words: string): boolean {
 }
 
 function needCreds(at: World): Creds {
-  const auth = creds(at);
+  const auth = orgCreds(at);
   if (auth === null) throw new Error("Not logged in to Sentry.");
   return auth;
 }
@@ -435,7 +435,7 @@ async function issueLaunch(at: World, key: string): Promise<Launch> {
       files,
       now: Date.now(),
       org: at.config.org,
-      baseUrl: at.config.baseUrl,
+      baseUrl: apiBase(at),
     }),
     name: clip(issue.title, 60),
   };

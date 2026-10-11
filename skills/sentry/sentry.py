@@ -28,17 +28,48 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 HOME = Path.home()
+
+
+def prifly_data_dir(platform: str | None = None, env: dict[str, str] | None = None, home: str | Path | None = None) -> str:
+    """Where prifly keeps its per-user data, as the host decides it (apps/desktop-host/src/platform/data-dir.ts).
+
+    Linux and WSL: $XDG_DATA_HOME/prifly (~/.local/share/prifly when unset);
+    macOS: ~/Library/Application Support/prifly;
+    Windows: %LOCALAPPDATA%\\prifly\\host (~\\AppData\\Local when unset).
+    prifly sets no environment variable naming this folder for its sessions;
+    only PRIFLY_DB (see prifly_db), which the host itself reads, can point elsewhere.
+    """
+    platform = sys.platform if platform is None else platform
+    env = dict(os.environ) if env is None else env
+    home = HOME if home is None else home
+    if platform == "win32":
+        local = env.get("LOCALAPPDATA") or str(PureWindowsPath(str(home), "AppData", "Local"))
+        return str(PureWindowsPath(local, "prifly", "host"))
+    if platform == "darwin":
+        return str(PurePosixPath(str(home), "Library", "Application Support", "prifly"))
+    xdg = env.get("XDG_DATA_HOME")
+    return str(PurePosixPath(xdg or str(PurePosixPath(str(home), ".local", "share")), "prifly"))
+
+
+def prifly_db(platform: str | None = None, env: dict[str, str] | None = None, home: str | Path | None = None) -> str:
+    """prifly's database file: $PRIFLY_DB when set, else prifly.db in its data folder."""
+    env = dict(os.environ) if env is None else env
+    if env.get("PRIFLY_DB"):
+        return env["PRIFLY_DB"]
+    if (sys.platform if platform is None else platform) == "win32":
+        return str(PureWindowsPath(prifly_data_dir(platform, env, home), "prifly.db"))
+    return str(PurePosixPath(prifly_data_dir(platform, env, home), "prifly.db"))
 
 
 def extension_roots() -> list[Path]:
     """This file's own extension first, then the one prifly runs (a plugin copy has no auth.json)."""
     here = Path(__file__).resolve().parent.parent.parent
     named = os.environ.get("PRIFLY_SENTRY_HOME")
-    installed = HOME / ".local/share/prifly/extensions/prifly-ext-sentry"
+    installed = Path(prifly_data_dir()) / "extensions" / "prifly-ext-sentry"
     roots = ([Path(named)] if named else []) + [here, installed]
     return list(dict.fromkeys(roots))
 
@@ -59,18 +90,33 @@ def prifly_setting(field: str) -> str:
 
     Read-only; any failure (no file, locked, no row, bad JSON) gives "".
     """
-    db = os.environ.get("PRIFLY_DB") or str(HOME / ".local/share/prifly/prifly.db")
+    row = db_value("select value from settings where key = 'prifly.extensions.settings.sentry'")
+    found = row.get(field) if isinstance(row, dict) else None
+    return found.strip() if isinstance(found, str) else ""
+
+
+def db_value(query: str) -> Any:
+    """The JSON in the first column of the query's first row of prifly's database, opened read-only; None on any failure."""
     try:
-        con = sqlite3.connect(f"file:{urllib.parse.quote(db)}?mode=ro", uri=True, timeout=1)
+        path = Path(prifly_db())
+        uri = path.as_uri() if path.is_absolute() else f"file:{urllib.parse.quote(str(path))}"
+        con = sqlite3.connect(f"{uri}?mode=ro", uri=True, timeout=1)
         try:
-            row = con.execute(
-                "select value from settings where key = 'prifly.extensions.settings.sentry'"
-            ).fetchone()
+            row = con.execute(query).fetchone()
         finally:
             con.close()
-        found = json.loads(row[0]).get(field) if row else None
-    except (sqlite3.Error, ValueError, AttributeError, TypeError):
-        return ""
+        return json.loads(row[0]) if row else None
+    except (sqlite3.Error, ValueError, TypeError, OSError):
+        return None
+
+
+def stored_region(org: str) -> str:
+    """The data region (https://de.sentry.io) the extension kept for this organization in prifly's database, or ""."""
+    choices = db_value(
+        "select value from extension_state where extension_id = 'sentry' and name = 'choices'"
+    )
+    regions = choices.get("regions") if isinstance(choices, dict) else None
+    found = regions.get(org) if isinstance(regions, dict) else None
     return found.strip() if isinstance(found, str) else ""
 
 
@@ -107,7 +153,11 @@ def settings(org_flag: str | None, base_flag: str | None = None) -> tuple[str, s
     org = org_flag or os.environ.get("SENTRY_ORG") or prifly_setting("org") or clirc("defaults", "org")
     if not org:
         sys.exit("no Sentry organization: pass --org, or choose it in prifly's Extensions dialog (Sentry issues), or set SENTRY_ORG, or put it in ~/.sentryclirc")
-    return (base or "https://sentry.io").rstrip("/") + "/api/0", token, org
+    base = (base or "https://sentry.io").rstrip("/")
+    if base == "https://sentry.io":
+        # The default address: the organization's data region, when the extension kept one (an EU organization is on de.sentry.io).
+        base = stored_region(org).rstrip("/") or base
+    return base + "/api/0", token, org
 
 
 def needed_permission(method: str, path: str) -> str:

@@ -24,8 +24,10 @@ import {
   startSessionsFrom,
 } from "./auto-start";
 import { type Checkout, checkoutFor } from "./checkout";
+import { CHOICE_KEYS, type Choices, hasState, parseChoices } from "./choices";
 import type { ExtensionApi, LaunchSpark } from "./prifly-api";
 import { obj, str } from "./read";
+import { ensureRegion, orgCreds } from "./region";
 import {
   type CodeMapping,
   type Creds,
@@ -39,6 +41,8 @@ import {
   whoami,
 } from "./sentry";
 import { SETTING_DEFAULTS, settingsRaw, type Values } from "./settings";
+
+export { type Choice, type Choices, hasState, parseChoices } from "./choices";
 
 export type Config = {
   /** The organization's slug: `morpheus-0r`. "" until chosen. */
@@ -98,7 +102,7 @@ export type World = {
 
 const SORTS: readonly Sort[] = ["date", "new", "freq", "user"];
 
-/** `~/src/odi` → `/home/jimmy/src/odi`; anything else as it is. */
+/** `~/src/app` → that folder under the home folder; anything else as it is. */
 export function expandHome(path: string, home: string): string {
   if (path === "~") return home;
   return path.startsWith("~/") ? join(home, path.slice(2)) : path;
@@ -222,7 +226,7 @@ function strings(raw: unknown): Record<string, string> {
   return kept;
 }
 
-/** The token and the server, when there is a login. */
+/** The token and the server, when there is a login. For calls that name no organization (who you are, the organization list). */
 export function creds(world: World): Creds | null {
   return world.login === null ? null : { baseUrl: world.config.baseUrl, token: world.login.token };
 }
@@ -340,8 +344,10 @@ const STATS_BATCH = 25;
  * its chip should still say it is resolved.
  */
 export async function reload(world: World): Promise<void> {
-  const auth = creds(world);
-  if (auth === null || !ready(world)) return;
+  if (!ready(world)) return;
+  await ensureRegion(world);
+  const auth = orgCreds(world);
+  if (auth === null) return;
   const { org, query, period, sort } = world.config;
   const [issues, mappings] = await Promise.all([
     organizationIssues(auth, org, { query, period, sort, limit: LIMIT }),
@@ -427,11 +433,6 @@ export function sortIssues(issues: Issue[], sort: Sort): Issue[] {
   return [...issues].sort((a, b) => key(b) - key(a));
 }
 
-/** Whether this prifly keeps extension state in its database (`api.state`). */
-export function hasState(api: ExtensionApi): boolean {
-  return (api.features ?? []).includes("state") && api.state !== undefined;
-}
-
 /** The settings now; the manifest's defaults on a prifly that keeps none. */
 function settingValues(api: ExtensionApi): Values {
   return hasSettings(api) && api.settings !== undefined ? api.settings : SETTING_DEFAULTS;
@@ -440,28 +441,6 @@ function settingValues(api: ExtensionApi): Values {
 /** A setting's text the way `settingsRaw` reads it. */
 function settingText(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
-}
-
-/**
- * A choice made in the chooser: the `value` picked, and `over`, what the
- * setting held when it was picked. The choice stands while the setting still
- * holds that; once the reader changes the setting on the Extensions page, the
- * setting wins again.
- */
-export type Choice = { value: string; over: string };
-export type Choices = { org?: Choice; sort?: Choice };
-
-const CHOICE_KEYS = ["org", "sort"] as const;
-
-export function parseChoices(raw: unknown): Choices {
-  const choices: Choices = {};
-  for (const key of CHOICE_KEYS) {
-    const choice = obj(obj(raw)[key]);
-    if (typeof choice["value"] === "string" && typeof choice["over"] === "string") {
-      choices[key] = { value: choice["value"], over: choice["over"] };
-    }
-  }
-  return choices;
 }
 
 /** What takes effect: the settings, with each chooser choice the reader has not since overruled. */

@@ -7,7 +7,7 @@ description: Search Sentry issues, read an issue with its latest event and stack
 
 Wraps `sentry.py`, which sits next to this SKILL.md: run it as `python3 <this skill's folder>/sentry.py` through `vault_run` (entry `sentry`). Standard library only.
 
-Credentials come from the reader's own Sentry login. In prifly it is filed in the vault as the entry `sentry` (the token they pasted into "From a Sentry issue…"): **run the script through the `vault_run` tool with `entry: "sentry"`**, which hands the token over as `SENTRY_TOKEN` (the vault names an api-token entry's variable after the entry; `SENTRY_AUTH_TOKEN` works too). Without the tool the script looks, in this order, at `SENTRY_AUTH_TOKEN`/`SENTRY_TOKEN`; the extension's `auth.json` (a prifly without the vault, or a login the reader declined to move); `~/.sentryclirc` (`sentry-cli login`). The organization comes from `--org`, `SENTRY_ORG`, the extension's settings in prifly's database, then `~/.sentryclirc`; the address likewise from `--base-url`, `SENTRY_URL`, those settings, then `~/.sentryclirc`. When the session's first message names `--org`/`--base-url` flags, pass them before the subcommand. If the script says there is no Sentry token, say so and stop — never ask the user for a token in chat, and do not go looking for tokens elsewhere.
+Credentials come from the reader's own Sentry login. In prifly it is filed in the vault as the entry `sentry` (the token they pasted into "From a Sentry issue…"): **run the script through the `vault_run` tool with `entry: "sentry"`**, which hands the token over as `SENTRY_TOKEN` (the vault names an api-token entry's variable after the entry; `SENTRY_AUTH_TOKEN` works too). Without the tool the script looks, in this order, at `SENTRY_AUTH_TOKEN`/`SENTRY_TOKEN`; the extension's `auth.json` (a prifly without the vault, or a login the reader declined to move); `~/.sentryclirc` (`sentry-cli login`). The organization comes from `--org`, `SENTRY_ORG`, the extension's settings in prifly's database, then `~/.sentryclirc`; the address likewise from `--base-url`, `SENTRY_URL`, those settings, then `~/.sentryclirc` (with the default sentry.io, the organization's data region the extension stored in prifly's database, such as de.sentry.io for an EU organization). When the session's first message names `--org`/`--base-url` flags, pass them before the subcommand. If the script says there is no Sentry token, say so and stop — never ask the user for a token in chat, and do not go looking for tokens elsewhere.
 
 In prifly, a session started from a Sentry issue already has that issue in its first prompt and the whole latest event saved as JSON on disk (the prompt names the file): read that file before calling the API again. Use this skill for other issues, other events of the same issue, and searching.
 
@@ -22,7 +22,7 @@ python3 <this skill's folder>/sentry.py search "level:fatal" --json
 
 # One issue: status, counts, notes, and its latest event (in-app frames, breadcrumbs, request, tags)
 python3 <this skill's folder>/sentry.py issue ODI-GC6
-python3 <this skill's folder>/sentry.py issue https://morpheus-0r.sentry.io/issues/7291288169/
+python3 <this skill's folder>/sentry.py issue https://your-org.sentry.io/issues/7291288169/
 
 # An issue's events, newest first — to see whether it is one user, one release, one host
 python3 <this skill's folder>/sentry.py events ODI-GC6 --limit 20
