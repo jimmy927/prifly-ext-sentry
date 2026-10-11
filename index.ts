@@ -409,7 +409,15 @@ async function issueLaunch(at: World, key: string): Promise<Launch> {
     cwd: checkout.folder,
   });
   const seeded: Launch = {
-    prompt: issuePrompt({ issue, event, folder, files, now: Date.now() }),
+    prompt: issuePrompt({
+      issue,
+      event,
+      folder,
+      files,
+      now: Date.now(),
+      org: at.config.org,
+      baseUrl: at.config.baseUrl,
+    }),
     name: clip(issue.title, 60),
   };
   // Found nowhere, the New session form asks, and `launched` remembers the answer.

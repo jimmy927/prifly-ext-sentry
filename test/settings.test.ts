@@ -14,6 +14,10 @@ import {
   parseConfig,
 } from "../world";
 
+// effectiveConfig reads the environment; these tests mean a machine without it.
+delete Bun.env["SENTRY_ORG"];
+delete Bun.env["SENTRY_URL"];
+
 const clirc = { token: "", org: "", url: "" };
 const atDefaults: Record<string, string | number> = { ...SETTING_DEFAULTS };
 
@@ -67,6 +71,16 @@ describe("parseProjectFolders", () => {
 describe("the settings alone", () => {
   test("settings at their defaults give the defaults", () => {
     expect(effectiveConfig(atDefaults, {}, clirc)).toEqual(parseConfig({}, {}, clirc, "/h"));
+  });
+
+  test("org and address at their defaults leave the environment and ~/.sentryclirc in charge", () => {
+    const rc = { ...clirc, org: "rc-org", url: "https://self.example/" };
+    const config = effectiveConfig(atDefaults, {}, rc);
+    expect(config.baseUrl).toBe("https://self.example");
+    expect(config.org).toBe("rc-org");
+    expect(effectiveConfig({ ...atDefaults, baseUrl: "https://sentry.io" }, {}, rc).baseUrl).toBe(
+      "https://self.example",
+    );
   });
 
   test("every setting takes effect, trimmed, with the folders as projects", () => {

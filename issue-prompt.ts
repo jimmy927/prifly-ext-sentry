@@ -35,6 +35,9 @@ export type PromptParts = {
   folder: string;
   files: string[];
   now: number;
+  /** The organization and Sentry address this extension is set to, for the sentry skill's flags. */
+  org?: string;
+  baseUrl?: string;
 };
 
 /** The issue read whole, as Markdown: the chooser's reading pane and the prompt share it. */
@@ -80,10 +83,22 @@ export function issuePrompt(parts: PromptParts): string {
     `${issue.permalink} · ${issue.shortId} · project ${issue.project}`,
     issueMarkdown(issue, parts.event, parts.now),
     section("Saved on disk", savedFiles(parts)),
+    skillFlags(parts),
     instruction(),
   ]
     .filter((block) => block !== "")
     .join("\n\n");
+}
+
+/** What the sentry skill needs to reach the same organization and server as this extension. */
+function skillFlags(parts: PromptParts): string {
+  const flags = [
+    parts.org === undefined || parts.org === "" ? "" : `--org ${parts.org}`,
+    parts.baseUrl === undefined || parts.baseUrl === "" ? "" : `--base-url ${parts.baseUrl}`,
+  ].filter((flag) => flag !== "");
+  return flags.length === 0
+    ? ""
+    : `When you use the sentry skill's script for this issue, pass \`${flags.join(" ")}\` before the subcommand.`;
 }
 
 function section(heading: string, body: string): string {

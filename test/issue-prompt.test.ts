@@ -9,6 +9,22 @@ function prompt(event: unknown, files: string[] = []): string {
   return issuePrompt({ issue, event, folder: "/ext/issues/SHOP-1A2", files, now: NOW });
 }
 
+describe("the sentry skill's flags", () => {
+  test("named when the extension knows the organization and address", () => {
+    const text = issuePrompt({
+      issue,
+      event: null,
+      folder: "/f",
+      files: [],
+      now: NOW,
+      org: "morpheus-0r",
+      baseUrl: "https://sentry.example.com",
+    });
+    expect(text).toContain("`--org morpheus-0r --base-url https://sentry.example.com`");
+    expect(prompt(null)).not.toContain("--org");
+  });
+});
+
 describe("issuePrompt", () => {
   const text = prompt(pythonEvent, [
     "/ext/issues/SHOP-1A2/issue.json",

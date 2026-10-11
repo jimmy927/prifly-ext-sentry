@@ -135,6 +135,10 @@ in files:
   left by an earlier version is imported into it once, the first time it is
   missing, and the file is never read or written again; you can delete it.
 
+An organization or sort picked in the chooser by an earlier version was kept
+only in `config.json`, which is no longer read: put it in the Extensions page,
+or pick it again.
+
 A prifly too old to keep settings or state is told so once in the log
 (`needs_newer_prifly`); the extension then runs on the default settings and
 remembers links and picks only until it stops. It never falls back to files.

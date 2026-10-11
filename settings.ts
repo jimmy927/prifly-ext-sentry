@@ -49,14 +49,20 @@ export function parseProjectFolders(text: unknown): Record<string, string> {
  */
 export function settingsRaw(values: Values): Record<string, unknown> {
   return {
-    org: text(values["org"]),
-    baseUrl: text(values["baseUrl"]),
+    org: unlessDefault("org", values),
+    baseUrl: unlessDefault("baseUrl", values),
     period: text(values["period"]),
-    sort: values["sort"],
+    sort: text(values["sort"]),
     query: text(values["query"]),
     refreshSeconds: values["refreshSeconds"],
     projects: parseProjectFolders(values["projectFolders"]),
   };
+}
+
+/** Empty or still the default means unset, so the environment and ~/.sentryclirc fallbacks apply. */
+function unlessDefault(key: "org" | "baseUrl", values: Values): string | undefined {
+  const value = text(values[key]);
+  return value === "" || value === SETTING_DEFAULTS[key] ? undefined : value;
 }
 
 function text(value: unknown): string | undefined {

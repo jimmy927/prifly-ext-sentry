@@ -7,7 +7,7 @@ description: Search Sentry issues, read an issue with its latest event and stack
 
 Wraps `sentry.py`, which sits next to this SKILL.md: run it as `python3 <this skill's folder>/sentry.py`. Standard library only.
 
-Credentials come from the reader's own Sentry login, in this order: `SENTRY_AUTH_TOKEN`; the prifly Sentry extension's `auth.json` (the token they pasted into "From a Sentry issue…"); `~/.sentryclirc` (`sentry-cli login`). The organization comes from `--org`, `SENTRY_ORG`, then `~/.sentryclirc`. If the script says it is not logged in, say so and stop — never ask the user for a token in chat, and do not go looking for tokens elsewhere.
+Credentials come from the reader's own Sentry login, in this order: `SENTRY_AUTH_TOKEN`; the prifly Sentry extension's `auth.json` (the token they pasted into "From a Sentry issue…"); `~/.sentryclirc` (`sentry-cli login`). The organization comes from `--org`, `SENTRY_ORG`, the extension's settings in prifly's database, then `~/.sentryclirc`; the address likewise from `--base-url`, `SENTRY_URL`, those settings, then `~/.sentryclirc`. When the session's first message names `--org`/`--base-url` flags, pass them before the subcommand. If the script says it is not logged in, say so and stop — never ask the user for a token in chat, and do not go looking for tokens elsewhere.
 
 In prifly, a session started from a Sentry issue already has that issue in its first prompt and the whole latest event saved as JSON on disk (the prompt names the file): read that file before calling the API again. Use this skill for other issues, other events of the same issue, and searching.
 
