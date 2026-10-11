@@ -69,7 +69,7 @@ describe("the settings alone", () => {
     expect(effectiveConfig(atDefaults, {})).toEqual(parseConfig({}, "/h"));
   });
 
-  test("the environment and ~/.sentryclirc do not set the organization or the address", () => {
+  test("SENTRY_ORG and SENTRY_URL in the environment do not set the organization or the address", () => {
     const saved = { org: Bun.env["SENTRY_ORG"], url: Bun.env["SENTRY_URL"] };
     Bun.env["SENTRY_ORG"] = "env-org";
     Bun.env["SENTRY_URL"] = "https://env.example";

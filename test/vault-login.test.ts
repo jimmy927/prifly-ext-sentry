@@ -81,7 +81,7 @@ describe("reading the token", () => {
     expect(fake.logs.join("\n")).not.toContain(OLD);
   });
 
-  test("the environment, a clirc and a file in the folder are not looked at", async () => {
+  test("SENTRY_AUTH_TOKEN in the environment is not looked at", async () => {
     const fake = fakePrifly("/x");
     const saved = Bun.env["SENTRY_AUTH_TOKEN"];
     Bun.env["SENTRY_AUTH_TOKEN"] = "from-env";

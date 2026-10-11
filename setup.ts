@@ -112,7 +112,7 @@ export function rejectedRows(world: World): LaunchChoice[] {
       key: KEYS.logout,
       title: "Log out of Sentry",
       group: "Log in",
-      detail: loginLine(world),
+      detail: "Removes the refused token from prifly's vault.",
       tone: "muted",
     },
   ];

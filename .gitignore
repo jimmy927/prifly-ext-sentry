@@ -1,3 +1,8 @@
+# Left in this folder by versions before the vault (they hold a Sentry token); never read now, never commit.
+auth.json
+state.json
+config.json
+vault-declined
 issues/
 node_modules/
 skills/*-local/
