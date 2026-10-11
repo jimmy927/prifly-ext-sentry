@@ -110,8 +110,13 @@ The token is looked for in this order: the vault entry `sentry`, `auth.json`,
 prifly, or from before the vault: on the first start with "vault-file" the
 extension offers to file its token in the vault (you confirm on prifly's card)
 and deletes `auth.json` once you accept. If you decline, `auth.json` stays and
-keeps working, and you are not asked again until you log in again. The token is
-never written to prifly's log or shown in a message.
+keeps working, and the move is never offered again (the same happens if you
+accept it at a level the extension cannot read, level 2 or 4). To move your
+login into the vault later, log in again from the chooser: the new token goes
+straight to the vault card, and once it is filed `auth.json` and the
+`vault-declined` marker are deleted. Logging out deletes both too. A card you
+leave unanswered, or that prifly refuses, is offered again at the next start.
+The token is never written to prifly's log or shown in a message.
 
 ## Settings and what the extension remembers
 

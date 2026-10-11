@@ -16,7 +16,9 @@
  *    prifly, readable only by the user who owns it. On a newer one it is only
  *    a leftover: moved into the vault on the first start (the reader confirms
  *    on prifly's vault card) and deleted; kept, and still used, while the
- *    reader has declined, until they log in again.
+ *    reader has declined (or filed it at a level this extension cannot read),
+ *    when the move is never offered again. Logging in again files the new
+ *    token in the vault and deletes it.
  * 3. `SENTRY_AUTH_TOKEN` in the host's environment — sentry-cli's variable.
  * 4. `~/.sentryclirc`'s `[auth] token` — what `sentry-cli login` writes.
  *
@@ -160,8 +162,8 @@ export async function forgetLogin(folder: string): Promise<void> {
 
 /**
  * Marks that the reader declined prifly's vault card for the token in
- * `auth.json`, so the move is not asked again at every start. Next to
- * `auth.json`, and gone again when the reader logs in.
+ * `auth.json`, so the move is never asked again. Next to `auth.json`, and
+ * deleted with it: when a new login is filed in the vault, and on "Log out".
  */
 const DECLINED = "vault-declined";
 
@@ -310,8 +312,9 @@ export type MoveOutcome =
  * The one-time move: on a prifly with "vault-file", a token in `auth.json`
  * with no vault entry yet is filed in the vault (the reader confirms on the
  * card, which can take as long as they like), and `auth.json` is deleted once
- * they accept. Declined, `auth.json` stays in use and is not offered again
- * until the reader logs in. A card that went unanswered or was refused is
+ * they accept. Declined (or filed at a level this extension cannot
+ * read), `auth.json` stays in use and the move is never offered again; logging
+ * in again files the new token in the vault instead. A card that went unanswered or was refused is
  * asked again at the next start.
  */
 export async function moveToVault(
