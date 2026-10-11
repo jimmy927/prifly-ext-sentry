@@ -61,12 +61,13 @@ describe("the user's name after a restart", () => {
   test("Sentry unreachable: the token still works, the name stays empty, and the log has no token", async () => {
     entries.set("sentry", TOKEN);
     answerWith(() => {
-      throw new Error(`connect failed with Bearer ${"x"}`);
+      throw new Error(`connect failed with Bearer ${TOKEN}`);
     });
     const world = await load(prifly());
     expect(world.login?.token).toBe(TOKEN);
     expect(world.login?.user).toBe("");
     expect(logs.some((line) => line.startsWith("user_name_failed"))).toBe(true);
+    expect(logs.join("\n")).toContain("[token]");
     expect(logs.join("\n")).not.toContain(TOKEN);
   });
 

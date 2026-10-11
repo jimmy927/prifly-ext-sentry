@@ -271,17 +271,21 @@ export async function withUser(
   login: Login | null,
 ): Promise<Login | null> {
   if (login === null || login.source !== "prifly vault" || login.user !== "") return login;
+  let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     const user = await Promise.race([
       whoami({ baseUrl: config.baseUrl, token: login.token }),
       new Promise<never>((_, reject) => {
-        setTimeout(() => reject(new Error("timed out")), NAME_WAIT_MS).unref();
+        timer = setTimeout(() => reject(new Error("timed out")), NAME_WAIT_MS);
       }),
     ]);
     return { ...login, user };
   } catch (caught) {
-    api.log("user_name_failed", { message: caught instanceof Error ? caught.message : "failed" });
+    const message = caught instanceof Error ? caught.message : "failed";
+    api.log("user_name_failed", { message: message.replaceAll(login.token, "[token]") });
     return login;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
