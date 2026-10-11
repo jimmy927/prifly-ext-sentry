@@ -13,18 +13,20 @@ function fakeWorld(): World {
     folder: "/tmp/fake-sentry-ext",
     paths: [],
   };
+  const config: World["config"] = {
+    org: "",
+    baseUrl: "https://sentry.io",
+    projects: {},
+    query: "is:unresolved",
+    period: "14d",
+    sort: "date",
+    refreshSeconds: 120,
+    startSessions: { enabled: false, levels: ["fatal", "error"], maxPerDay: 10, maxAgeHours: 24 },
+  };
   return {
     api,
-    config: {
-      org: "",
-      baseUrl: "https://sentry.io",
-      projects: {},
-      query: "is:unresolved",
-      period: "14d",
-      sort: "date",
-      refreshSeconds: 120,
-      startSessions: { enabled: false, levels: ["fatal", "error"], maxPerDay: 10, maxAgeHours: 24 },
-    },
+    config,
+    file: { ...config },
     login: null,
     state: { links: {}, folders: {}, linkedAt: {}, attempted: {} },
     issues: [],

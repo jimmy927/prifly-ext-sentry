@@ -12,7 +12,13 @@
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { type Clirc, findLogin, type Login, readClirc } from "./auth";
-import { type Attempt, parseStartSessions, type StartSessions } from "./auto-start";
+import {
+  type Attempt,
+  hasSettings,
+  parseStartSessions,
+  type StartSessions,
+  startSessionsFrom,
+} from "./auto-start";
 import { type Checkout, checkoutFor } from "./checkout";
 import type { ExtensionApi, LaunchSpark } from "./prifly-api";
 import { obj, str } from "./read";
@@ -27,6 +33,7 @@ import {
   SentryError,
   type Sort,
 } from "./sentry";
+import { fileOnlyKeys, overlaySettings } from "./settings";
 
 export type Config = {
   /** The organization's slug: `morpheus-0r`. "" until chosen. */
@@ -66,7 +73,10 @@ export type State = {
 
 export type World = {
   api: ExtensionApi;
+  /** What takes effect: the Extensions page's settings over `file`, or `file` alone on an older prifly. */
   config: Config;
+  /** What `config.json` holds; the only part of `config` that is written back to it. */
+  file: Config;
   login: Login | null;
   state: State;
   /** What the chooser lists: the organization's issues, newest or busiest first. */
@@ -241,9 +251,23 @@ async function mappingsOrNone(world: World, auth: Creds): Promise<CodeMapping[]>
 
 export async function load(api: ExtensionApi): Promise<World> {
   const clirc = await readClirc();
+  const raw = await readConfigFile(api.folder);
+  const file = parseConfig(raw, Bun.env, clirc, homedir());
+  const config = settingsConfig(api, raw, clirc) ?? file;
+  if (api.settings !== undefined && hasSettings(api)) {
+    const waiting = fileOnlyKeys(raw, api.settings);
+    if (waiting.length > 0) {
+      api.log("config_json_in_use", {
+        keys: waiting.join(","),
+        message:
+          "These come from config.json because their setting is still at its default; enter them in prifly's Extensions dialog (Sentry issues) to move them with prifly's data.",
+      });
+    }
+  }
   return {
     api,
-    config: await readConfig(api.folder, clirc),
+    config,
+    file,
     login: await findLogin(api.folder, Bun.env, clirc),
     state: await readState(api.folder),
     issues: [],
@@ -357,15 +381,47 @@ export function sortIssues(issues: Issue[], sort: Sort): Issue[] {
   return [...issues].sort((a, b) => key(b) - key(a));
 }
 
-export async function readConfig(folder: string, clirc: Clirc): Promise<Config> {
-  const raw: unknown = await Bun.file(join(folder, "config.json"))
+async function readConfigFile(folder: string): Promise<unknown> {
+  return await Bun.file(join(folder, "config.json"))
     .json()
     .catch(() => ({}));
-  return parseConfig(raw, Bun.env, clirc, homedir());
 }
 
-export async function writeConfig(folder: string, config: Config): Promise<void> {
+/**
+ * The effective config where this prifly keeps settings: `config.json`'s
+ * values with the settings laid over them (`settings.ts`), and the
+ * auto-start block from the settings alone. Null on a prifly without them.
+ */
+export function settingsConfig(api: ExtensionApi, fileRaw: unknown, clirc: Clirc): Config | null {
+  if (api.settings === undefined || !hasSettings(api)) return null;
+  const config = parseConfig(overlaySettings(fileRaw, api.settings), Bun.env, clirc, homedir());
+  config.startSessions = startSessionsFrom(api.settings);
+  return config;
+}
+
+/** Re-reads `config.json` and lays the current settings over it, after the reader changed one. */
+export async function applySettings(world: World): Promise<void> {
+  const clirc = await readClirc();
+  const raw = await readConfigFile(world.api.folder);
+  world.file = parseConfig(raw, Bun.env, clirc, homedir());
+  const config = settingsConfig(world.api, raw, clirc);
+  if (config !== null) world.config = config;
+}
+
+/** Writes `config.json`: only what the file holds, never the settings laid over it. */
+async function writeConfig(folder: string, config: Config): Promise<void> {
   await Bun.write(join(folder, "config.json"), JSON.stringify(config, null, 2));
+}
+
+/**
+ * A choice made in the chooser (organization, sort): kept in `config.json`
+ * and in force now. Where a setting is set to something else, the setting
+ * wins again the next time the reader changes any setting.
+ */
+export async function chooseInFile(world: World, change: Partial<Config>): Promise<void> {
+  Object.assign(world.config, change);
+  Object.assign(world.file, change);
+  await writeConfig(world.api.folder, world.file);
 }
 
 export async function readState(folder: string): Promise<State> {

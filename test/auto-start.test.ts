@@ -200,6 +200,7 @@ function fakeWorld(features: string[] | undefined, withStart = true) {
   const world: World = {
     api,
     config: { ...parseConfig({}, {}, clirc, "/h"), startSessions: on },
+    file: parseConfig({}, {}, clirc, "/h"),
     login: null,
     state: parseState({}),
     issues: [issue("a")],

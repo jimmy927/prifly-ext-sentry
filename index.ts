@@ -11,7 +11,8 @@
  * stays on that session's banner: click it to open it in Sentry, or use its
  * menu to resolve or archive it when the work is done.
  *
- * There is nothing to configure by hand. The first time you open the chooser
+ * There is nothing to configure by hand (the few plain settings are in prifly's
+ * Extensions page; `settings.ts`). The first time you open the chooser
  * it offers the login, then your organizations. See `setup.ts` for that,
  * `auth.ts` for where the token comes
  * from, and `world.ts` for the small files this folder keeps.
@@ -19,13 +20,7 @@
 
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  hasSettings,
-  issuesToStart,
-  recentAttempts,
-  starter,
-  startSessionsFrom,
-} from "./auto-start";
+import { hasSettings, issuesToStart, recentAttempts, starter } from "./auto-start";
 import { mainCheckout } from "./checkout";
 import { eventId } from "./event";
 import { COLUMNS, issueChip, issueFace, issueItem, launcherFlag } from "./issue-face";
@@ -57,6 +52,7 @@ import {
 import { isSetupKey, runSetup, setupChoices, setupTail } from "./setup";
 import { shortDate } from "./time";
 import {
+  applySettings,
   checkoutOf,
   creds,
   linkIssue,
@@ -72,16 +68,6 @@ let world: World | null = null;
 
 export async function activate(api: ExtensionApi): Promise<() => void> {
   world = await load(api);
-  // Where prifly keeps settings, the Extensions page decides; config.json's
-  // `startSessions` is for an older prifly.
-  if (hasSettings(api) && api.settings !== undefined) {
-    world.config.startSessions = startSessionsFrom(api.settings);
-    api.onSettings?.((values) => {
-      if (world === null) return;
-      world.config.startSessions = startSessionsFrom(values);
-      api.log("settings", { startSessions: world.config.startSessions.enabled });
-    });
-  }
   let stopped = false;
   const tick = async () => {
     try {
@@ -98,10 +84,32 @@ export async function activate(api: ExtensionApi): Promise<() => void> {
       api.log("refresh_failed", { message: message(caught) });
     }
   };
-  await tick();
-  const timer = setInterval(() => {
+  let every = world.config.refreshSeconds;
+  let timer = setInterval(() => {
     if (!stopped) void tick();
-  }, world.config.refreshSeconds * 1000);
+  }, every * 1000);
+  // Where prifly keeps settings, the Extensions page decides (over config.json,
+  // `settings.ts`); the list is read again with whatever the reader changed.
+  if (hasSettings(api)) {
+    api.onSettings?.(() => {
+      const at = world;
+      if (at === null) return;
+      void (async () => {
+        await applySettings(at);
+        at.loadedAt = 0;
+        api.log("settings", { org: at.config.org, startSessions: at.config.startSessions.enabled });
+        if (at.config.refreshSeconds !== every) {
+          every = at.config.refreshSeconds;
+          clearInterval(timer);
+          timer = setInterval(() => {
+            if (!stopped) void tick();
+          }, every * 1000);
+        }
+        await tick();
+      })().catch((caught) => api.log("settings_failed", { message: message(caught) }));
+    });
+  }
+  await tick();
   return () => {
     stopped = true;
     clearInterval(timer);

@@ -77,7 +77,8 @@ code is in — its **code mappings**, under Settings → Integrations → GitHub
 GitLab…) → Code Mappings — and this machine knows where that repository is
 checked out. Looked for in this order:
 
-1. a folder pinned to the project in `config.json`'s `projects` (optional);
+1. a folder pinned to the project in the **Project folders** setting or
+   `config.json`'s `projects` (optional);
 2. the checkout the project's last session ran in (remembered in `state.json`);
 3. the checkout behind any folder a prifly session on this machine runs in;
 4. a checkout in `~`, `~/src` or `~/code` whose git remote is the repo — a
@@ -101,9 +102,26 @@ seen**, **Switch organization…**, **Log out of Sentry**
 (which deletes `auth.json`; a token from `SENTRY_AUTH_TOKEN` or
 `~/.sentryclirc` is sentry-cli's, and stays).
 
-## config.json
+## Settings and config.json
 
-Written by the setup rows; edit it by hand if you like
+In a prifly with extension settings, the plain settings live in prifly's
+Extensions page (unfold "Sentry issues"): **Sentry organization**, **Sentry
+address**, **Project folders**, **Search**, **Seen within**, **Sort by**,
+**Refresh every** and the auto-start ones below. prifly keeps them with its
+own data, so they move with it to another host. On a Windows host, set the
+project folder once there, as `slug=folder` pairs separated by `;`
+(`odi=C:\Users\you\src\odi`).
+
+An extension cannot write its own settings, so `config.json` is not imported
+into them. Instead, per setting: one that is not at its default wins, and one
+still at its default lets `config.json`'s value through (for **Project
+folders**, per project). When that happens the log says once, as
+`config_json_in_use`, which settings to enter in the dialog; after that
+`config.json` can go. The setup rows (organization, **Sort by events / last
+seen**) still write `config.json`, which is also where a choice made in the
+chooser is kept. A prifly without extension settings reads `config.json` alone.
+
+`config.json` is written by the setup rows; edit it by hand if you like
 (`config.example.json` shows every field):
 
 ```json
