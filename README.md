@@ -18,6 +18,19 @@ the same way.
 
 ## Install
 
+Needs a prifly with extension **settings**, **state** and the **vault** (its
+"vault-file" feature). When one of the three is missing the list shows a single
+row, "Update prifly to use this extension", and nothing else runs: no refresh,
+no Sentry calls.
+
+**Upgrading from an earlier version?** The token used to be kept in `auth.json`
+in this folder (or read from `SENTRY_AUTH_TOKEN` / `~/.sentryclirc`), and the
+choices in `state.json` / `config.json`. None of these is read any more, so you
+log in once again: open **From a Sentry issue…** and paste a token (below); it
+goes straight into the vault. Delete the old `auth.json` and `state.json`
+yourself. Your settings are on the Extensions page and are not affected; links
+from sessions to issues made before `api.state` are not carried over.
+
 In prifly: status bar → the puzzle icon → Install from
 `https://github.com/jimmy927/prifly-ext-sentry`, then tick it to enable it.
 
@@ -69,8 +82,7 @@ Open **From a Sentry issue…** and follow the rows it shows:
 2. **Paste the token Sentry shows you** — one paste, once. It is checked
    against Sentry there and then and kept in **prifly's vault** (the entry
    `sentry`; prifly shows you a card to confirm it, and the token travels with
-   prifly's data). On a prifly older than the vault's "vault-file" feature it
-   is kept in `auth.json` in this folder instead, readable only by you.
+   prifly's data). It is never written to a file.
 3. **Choose an organization** — and that is all. Every project in it is
    listed, including ones made in Sentry later; there are no projects to map.
 
@@ -97,29 +109,20 @@ you pick the folder") and prifly's New session form asks for the folder. The
 checkout you pick there is remembered for that project's next session. Give a
 project a code mapping in Sentry and none of this is needed.
 
-If you already use `sentry-cli`, there is nothing to paste: a token in
-`SENTRY_AUTH_TOKEN` (in the environment prifly's host starts with) or in
-`~/.sentryclirc` (`sentry-cli login`) is used as it is, and the organization in
-`~/.sentryclirc`'s `[defaults]` is taken too. The chooser never asks for a
-token in any other way, and sessions are told never to ask for one.
+The token is read from one place only: the vault entry `sentry`. Neither
+`SENTRY_AUTH_TOKEN` nor `~/.sentryclirc` (`sentry-cli`'s) is looked at, and
+neither is the organization in them: choose it in the chooser or on the
+Extensions page. Sessions are told never to ask for a token.
 
 The rows kept beside the issues change any of it later: **Sort by events / last
-seen**, **Switch organization…**, **Log out of Sentry**
-(which removes the vault entry and deletes `auth.json`; a token from
-`SENTRY_AUTH_TOKEN` or `~/.sentryclirc` is sentry-cli's, and stays).
+seen**, **Switch organization…**, **Log out of Sentry** (which removes the
+vault entry; an entry you made yourself in the vault is yours to remove).
 
-The token is looked for in this order: the vault entry `sentry`, `auth.json`,
-`SENTRY_AUTH_TOKEN`, `~/.sentryclirc`. `auth.json` only exists on an older
-prifly, or from before the vault: on the first start with "vault-file" the
-extension offers to file its token in the vault (you confirm on prifly's card)
-and deletes `auth.json` once you accept. If you decline, `auth.json` stays and
-keeps working, and the move is never offered again (the same happens if you
-accept it at a level the extension cannot read, level 2 or 4). To move your
-login into the vault later, log in again from the chooser: the new token goes
-straight to the vault card, and once it is filed `auth.json` and the
-`vault-declined` marker are deleted. Logging out deletes both too. A card you
-leave unanswered, or that prifly refuses, is offered again at the next start.
-The token is never written to prifly's log or shown in a message.
+If the vault card is declined, left unanswered or refused, nothing is saved and
+the row says so; the token is filed at level 1, the only one the extension can
+read. If Sentry later refuses the saved token (revoked, expired), the list shows
+"Sentry refused the saved token" with the login rows again: paste a new one, or
+log out. The token is never written to prifly's log or shown in a message.
 
 ## Settings and what the extension remembers
 
@@ -171,30 +174,17 @@ in files:
   until you change that setting on the Extensions page; a setting changed after
   a pick wins over it;
 - which session was started from which issue, and which folder each project's
-  sessions were last started in — a document called `state`. A `state.json`
-  left by an earlier version is imported into it once, the first time it is
-  missing, and the file is never read or written again; you can delete it.
+  sessions were last started in — a document called `state`.
 
-An organization or sort picked in the chooser by an earlier version was kept
-only in `config.json`, which is no longer read: put it in the Extensions page,
-or pick it again.
-
-A prifly too old to keep settings or state is told so once in the log
-(`needs_newer_prifly`); the extension then runs on the default settings and
-remembers links and picks only until it stops. It never falls back to files.
-
-`auth.json` (the token pasted into the chooser, on a prifly without the vault,
-or kept when you declined moving it), the `vault-declined` marker and the saved
-`issues/` are the only files it writes, all ignored by git: nothing about your
-account or your errors is ever committed.
+The only files it writes are the saved `issues/`, ignored by git: nothing about
+your account or your errors is ever committed.
 
 ## Starting sessions by itself
 
 With it turned on, each new error nobody works on becomes a session without
 a click. Turn it on in prifly's Extensions page: unfold "Sentry issues" and
 tick **Start sessions by itself**, with the **Levels** that count, the
-**Most per day** and **Newest errors only (hours)**. A prifly without
-extension settings leaves it off.
+**Most per day** and **Newest errors only (hours)**.
 
 On every refresh, each open issue whose level is in `levels` and that no
 session carries yet is started, oldest first seen first, at most three a
@@ -236,9 +226,11 @@ is not started: the New session form would have asked for the folder.
   unresolved list.
 - **A Claude Code skill** — `skills/sentry`: search issues, read an issue and
   its latest event, list its events, save an event's JSON, and resolve /
-  archive / reopen when asked. Same login, standard-library Python. The
-  repository is also a Claude Code plugin and its own marketplace, so terminal
-  sessions can have it too:
+  archive / reopen when asked. In prifly it uses the same login: sessions run
+  it through `vault_run` with the entry `sentry`, which sets `SENTRY_TOKEN`.
+  Standard-library Python. The repository is also a Claude Code plugin and its
+  own marketplace, so terminal sessions can have it too; there, set
+  `SENTRY_AUTH_TOKEN` to your Sentry token:
 
       claude plugin marketplace add jimmy927/prifly-ext-sentry
       claude plugin install sentry@prifly-ext-sentry

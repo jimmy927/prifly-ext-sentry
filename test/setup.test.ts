@@ -1,18 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import type { ExtensionApi } from "../prifly-api";
 import { SentryError } from "../sentry";
 import { setupChoices, tokenPageMessage } from "../setup";
 import type { World } from "../world";
+import { fakePrifly } from "./fake-prifly";
 
 function fakeWorld(): World {
-  const api: ExtensionApi = {
-    show: () => undefined,
-    onAction: () => undefined,
-    sessions: () => [],
-    log: () => undefined,
-    folder: "/tmp/fake-sentry-ext",
-    paths: [],
-  };
+  const { api } = fakePrifly("/tmp/fake-sentry-ext");
   const config: World["config"] = {
     org: "",
     baseUrl: "https://sentry.io",

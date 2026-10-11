@@ -10,7 +10,7 @@
     {
       "id": "org",
       "label": "Sentry organization",
-      "description": "The organization's slug, like morpheus-0r. Left empty, the chooser offers your organizations, or takes it from SENTRY_ORG or ~/.sentryclirc.",
+      "description": "The organization's slug, like morpheus-0r. Left empty, the chooser offers your organizations.",
       "type": "string",
       "default": ""
     },

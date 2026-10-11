@@ -73,11 +73,6 @@ export function startSessionsFrom(values: Readonly<Record<string, SettingValue>>
   });
 }
 
-/** Whether this prifly keeps the settings (`api.settings`); without it the defaults apply. */
-export function hasSettings(api: ExtensionApi): boolean {
-  return (api.features ?? []).includes("settings") && api.settings !== undefined;
-}
-
 /** The attempts of the last day; older ones are forgotten. */
 export function recentAttempts(
   attempted: Record<string, Attempt>,

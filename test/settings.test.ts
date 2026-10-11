@@ -1,8 +1,7 @@
-import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { describe, expect, test } from "bun:test";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExtensionApi } from "../prifly-api";
 import { parseProjectFolders, SETTING_DEFAULTS } from "../settings";
 import {
   applySettings,
@@ -12,18 +11,10 @@ import {
   linkIssue,
   load,
   parseConfig,
+  supported,
 } from "../world";
+import { fakePrifly, type Needed } from "./fake-prifly";
 
-// effectiveConfig reads the environment; these tests mean a machine without it.
-const savedEnv = { org: Bun.env["SENTRY_ORG"], url: Bun.env["SENTRY_URL"] };
-delete Bun.env["SENTRY_ORG"];
-delete Bun.env["SENTRY_URL"];
-afterAll(() => {
-  if (savedEnv.org !== undefined) Bun.env["SENTRY_ORG"] = savedEnv.org;
-  if (savedEnv.url !== undefined) Bun.env["SENTRY_URL"] = savedEnv.url;
-});
-
-const clirc = { token: "", org: "", url: "" };
 const atDefaults: Record<string, string | number> = { ...SETTING_DEFAULTS };
 
 describe("the manifest", () => {
@@ -75,17 +66,23 @@ describe("parseProjectFolders", () => {
 
 describe("the settings alone", () => {
   test("settings at their defaults give the defaults", () => {
-    expect(effectiveConfig(atDefaults, {}, clirc)).toEqual(parseConfig({}, {}, clirc, "/h"));
+    expect(effectiveConfig(atDefaults, {})).toEqual(parseConfig({}, "/h"));
   });
 
-  test("org and address at their defaults leave the environment and ~/.sentryclirc in charge", () => {
-    const rc = { ...clirc, org: "rc-org", url: "https://self.example/" };
-    const config = effectiveConfig(atDefaults, {}, rc);
-    expect(config.baseUrl).toBe("https://self.example");
-    expect(config.org).toBe("rc-org");
-    expect(effectiveConfig({ ...atDefaults, baseUrl: "https://sentry.io" }, {}, rc).baseUrl).toBe(
-      "https://self.example",
-    );
+  test("the environment and ~/.sentryclirc do not set the organization or the address", () => {
+    const saved = { org: Bun.env["SENTRY_ORG"], url: Bun.env["SENTRY_URL"] };
+    Bun.env["SENTRY_ORG"] = "env-org";
+    Bun.env["SENTRY_URL"] = "https://env.example";
+    try {
+      const config = effectiveConfig(atDefaults, {});
+      expect(config.org).toBe("");
+      expect(config.baseUrl).toBe("https://sentry.io");
+    } finally {
+      if (saved.org === undefined) delete Bun.env["SENTRY_ORG"];
+      else Bun.env["SENTRY_ORG"] = saved.org;
+      if (saved.url === undefined) delete Bun.env["SENTRY_URL"];
+      else Bun.env["SENTRY_URL"] = saved.url;
+    }
   });
 
   test("every setting takes effect, trimmed, with the folders as projects", () => {
@@ -103,7 +100,6 @@ describe("the settings alone", () => {
         startMaxAgeHours: 6,
       },
       {},
-      clirc,
     );
     expect(config).toMatchObject({
       org: "morpheus-0r",
@@ -118,183 +114,106 @@ describe("the settings alone", () => {
     expect(config.startSessions).toMatchObject({ enabled: true, maxAgeHours: 6 });
   });
 
-  test("an emptied query means every issue, an emptied org falls to the login's", () => {
-    expect(effectiveConfig({ ...atDefaults, query: "" }, {}, clirc).query).toBe("");
-    expect(effectiveConfig({ ...atDefaults, org: "  " }, {}, { ...clirc, org: "rc" }).org).toBe(
-      "rc",
-    );
+  test("an emptied query means every issue, an emptied org means none chosen", () => {
+    expect(effectiveConfig({ ...atDefaults, query: "" }, {}).query).toBe("");
+    expect(effectiveConfig({ ...atDefaults, org: "  " }, {}).org).toBe("");
   });
 });
 
-/** The slice of `api.state` the extension uses, in memory: writes to one name run in turn, like prifly's. */
-function fakeState(initial: Record<string, unknown> = {}) {
-  const docs = new Map<string, unknown>(Object.entries(initial));
-  let tail: Promise<unknown> = Promise.resolve();
-  const inLine = <T>(job: () => Promise<T>): Promise<T> => {
-    const run = tail.then(job, job);
-    tail = run.catch(() => undefined);
-    return run;
-  };
-  const copy = <T>(value: T): T => JSON.parse(JSON.stringify(value));
-  const store = {
-    get: async (name: string) => (docs.has(name) ? copy(docs.get(name)) : undefined),
-    update: (name: string, fn: (current: unknown) => unknown) =>
-      inLine(async () => {
-        const next = copy(await fn(docs.has(name) ? copy(docs.get(name)) : undefined));
-        docs.set(name, next);
-        return copy(next);
-      }),
-    importOnce: (name: string, make: () => unknown) =>
-      inLine(async () => {
-        if (docs.has(name)) return copy(docs.get(name));
-        const made = await make();
-        if (made === undefined) return undefined;
-        docs.set(name, copy(made));
-        return copy(made);
-      }),
-  };
-  return { docs, store: store as unknown as NonNullable<ExtensionApi["state"]> };
-}
-
-function fakeApi(
-  folder: string,
-  extra: Partial<ExtensionApi>,
-): {
-  api: ExtensionApi;
-  logged: { event: string; fields?: Record<string, unknown> | undefined }[];
-} {
-  const logged: { event: string; fields?: Record<string, unknown> | undefined }[] = [];
-  const api = {
-    folder,
-    log: (event: string, fields?: Record<string, unknown>) => logged.push({ event, fields }),
-    sessions: () => [],
-    ...extra,
-  } as unknown as ExtensionApi;
-  return { api, logged };
-}
-
 const newFolder = () => mkdtempSync(join(tmpdir(), "sentry-settings-"));
-const withBoth = (
-  store: ReturnType<typeof fakeState>["store"],
-  settings: Record<string, string | number> = atDefaults,
-) => ({
-  features: ["settings", "state"],
-  settings: { ...settings },
-  state: store,
-});
 
 describe("load", () => {
-  test("takes the settings, and a config.json beside it is never looked at", async () => {
+  test("takes the settings, and no file in the folder is looked at or made", async () => {
     const folder = newFolder();
-    writeFileSync(join(folder, "config.json"), JSON.stringify({ org: "file-org", period: "30d" }));
-    const { store } = fakeState();
-    const { api, logged } = fakeApi(folder, withBoth(store, { ...atDefaults, period: "7d" }));
-    const world = await load(api);
+    const fake = fakePrifly(folder, { settings: { ...atDefaults, period: "7d" } });
+    const world = await load(fake.api);
     expect(world.config.org).toBe("");
     expect(world.config.period).toBe("7d");
-    expect(logged).toEqual([]);
-    expect(JSON.parse(readFileSync(join(folder, "config.json"), "utf8"))).toEqual({
-      org: "file-org",
-      period: "30d",
-    });
+    expect(fake.logs).toEqual([]);
+    expect(readdirSync(folder)).toEqual([]);
   });
 });
 
 describe("the chooser's choices", () => {
   test("a choice is kept in api.state and still there after a restart", async () => {
-    const folder = newFolder();
-    const { docs, store } = fakeState();
-    const first = await load(fakeApi(folder, withBoth(store)).api);
-    await choose(first, { org: "picked" });
-    await choose(first, { sort: "freq" });
-    expect(first.config).toMatchObject({ org: "picked", sort: "freq" });
-    expect(docs.get("choices")).toEqual({
+    const first = fakePrifly(newFolder(), { settings: { ...atDefaults } });
+    const world = await load(first.api);
+    await choose(world, { org: "picked" });
+    await choose(world, { sort: "freq" });
+    expect(world.config).toMatchObject({ org: "picked", sort: "freq" });
+    expect(JSON.parse(first.database.docs.get("choices") ?? "null")).toEqual({
       org: { value: "picked", over: "" },
       sort: { value: "freq", over: "date" },
     });
 
-    const second = await load(fakeApi(folder, withBoth(store)).api);
-    expect(second.config).toMatchObject({ org: "picked", sort: "freq" });
+    const second = fakePrifly(newFolder(), {
+      settings: { ...atDefaults },
+      database: first.database,
+    });
+    expect((await load(second.api)).config).toMatchObject({ org: "picked", sort: "freq" });
   });
 
   test("a setting the reader changes afterwards wins over the older choice", async () => {
-    const folder = newFolder();
-    const { store } = fakeState();
-    const settings = { ...atDefaults };
-    const { api } = fakeApi(folder, withBoth(store, settings));
-    const world = await load(api);
+    const fake = fakePrifly(newFolder(), { settings: { ...atDefaults } });
+    const world = await load(fake.api);
     await choose(world, { org: "picked", sort: "freq" });
     // the reader types an organization on the Extensions page; the sort is left alone
-    (api.settings as Record<string, unknown>)["org"] = "typed";
-    await applySettings(world);
+    (fake.api.settings as Record<string, unknown>)["org"] = "typed";
+    applySettings(world);
     expect(world.config).toMatchObject({ org: "typed", sort: "freq" });
     // set back to what it was when the choice was made, the choice stands again
-    (api.settings as Record<string, unknown>)["org"] = "";
-    await applySettings(world);
+    (fake.api.settings as Record<string, unknown>)["org"] = "";
+    applySettings(world);
     expect(world.config.org).toBe("picked");
   });
 
   test("switching organization is a choice too, and survives a restart", async () => {
-    const folder = newFolder();
-    const { store } = fakeState();
     const settings = { ...atDefaults, org: "from-settings" };
-    const world = await load(fakeApi(folder, withBoth(store, settings)).api);
+    const first = fakePrifly(newFolder(), { settings });
+    const world = await load(first.api);
     expect(world.config.org).toBe("from-settings");
     await choose(world, { org: "" });
-    const again = await load(fakeApi(folder, withBoth(store, settings)).api);
+    const again = await load(
+      fakePrifly(newFolder(), { settings: { ...settings }, database: first.database }).api,
+    );
     expect(again.config.org).toBe("");
   });
 });
 
-describe("state.json, imported once", () => {
-  const legacy = {
-    links: { s1: ["a", "b"] },
-    linkedAt: { a: 5 },
-    folders: { shop: "/src/shop" },
-    attempted: { a: { at: 9, started: true } },
-  };
-
-  test("a state.json that is there becomes the state document, and is left alone", async () => {
+describe("the state document", () => {
+  test("starts empty, and nothing is stored or written until something changes", async () => {
     const folder = newFolder();
-    const text = JSON.stringify(legacy);
-    writeFileSync(join(folder, "state.json"), text);
-    const { docs, store } = fakeState();
-    const world = await load(fakeApi(folder, withBoth(store)).api);
-    expect(world.state).toEqual({ ...legacy, linkedAt: { a: 5 } });
-    expect(docs.get("state")).toEqual(world.state);
-    expect(readFileSync(join(folder, "state.json"), "utf8")).toBe(text);
-  });
-
-  test("no state.json: nothing is stored and no file is made", async () => {
-    const folder = newFolder();
-    const { docs, store } = fakeState();
-    const world = await load(fakeApi(folder, withBoth(store)).api);
+    const fake = fakePrifly(folder);
+    const world = await load(fake.api);
     expect(world.state).toEqual({ links: {}, linkedAt: {}, folders: {}, attempted: {} });
-    expect(docs.has("state")).toBe(false);
+    expect(fake.database.docs.has("state")).toBe(false);
     expect(readdirSync(folder)).toEqual([]);
   });
 
-  test("an unreadable state.json imports nothing", async () => {
+  test("a state.json in the folder is not imported", async () => {
     const folder = newFolder();
-    writeFileSync(join(folder, "state.json"), "{ not json");
-    const { docs, store } = fakeState();
-    await load(fakeApi(folder, withBoth(store)).api);
-    expect(docs.has("state")).toBe(false);
+    await Bun.write(
+      join(folder, "state.json"),
+      JSON.stringify({ links: { s1: ["a"] }, folders: { shop: "/src/shop" } }),
+    );
+    const fake = fakePrifly(folder);
+    const world = await load(fake.api);
+    expect(world.state.links).toEqual({});
+    expect(fake.database.docs.has("state")).toBe(false);
   });
 
-  test("already imported: the document wins and the file is not read again", async () => {
-    const folder = newFolder();
-    writeFileSync(join(folder, "state.json"), JSON.stringify(legacy));
-    const { store } = fakeState({ state: { links: { s2: ["z"] } } });
-    const world = await load(fakeApi(folder, withBoth(store)).api);
+  test("what the document holds is what loads", async () => {
+    const first = fakePrifly(newFolder());
+    await first.database.set("state", { links: { s2: ["z"] } });
+    const world = await load(fakePrifly(newFolder(), { database: first.database }).api);
     expect(world.state.links).toEqual({ s2: ["z"] });
     expect(world.state.folders).toEqual({});
   });
 
   test("changes go through update, so two at once both stay", async () => {
     const folder = newFolder();
-    const { docs, store } = fakeState();
-    const world = await load(fakeApi(folder, withBoth(store)).api);
+    const fake = fakePrifly(folder);
+    const world = await load(fake.api);
     await Promise.all([
       changeState(world, (state) => linkIssue(state, "s1", "a", 1)),
       changeState(world, (state) => linkIssue(state, "s2", "b", 2)),
@@ -302,7 +221,7 @@ describe("state.json, imported once", () => {
         state.folders["shop"] = "/src/shop";
       }),
     ]);
-    const stored = docs.get("state") as typeof world.state;
+    const stored = JSON.parse(fake.database.docs.get("state") ?? "null") as typeof world.state;
     expect(stored.links).toEqual({ s1: ["a"], s2: ["b"] });
     expect(stored.folders).toEqual({ shop: "/src/shop" });
     expect(world.state).toEqual(stored);
@@ -310,36 +229,45 @@ describe("state.json, imported once", () => {
   });
 });
 
-describe("a prifly without settings or state", () => {
-  test("says once it needs a newer prifly, keeps defaults and memory, writes no file", async () => {
-    for (const extra of [{}, { features: [] }, { settings: { ...atDefaults, org: "ignored" } }]) {
-      const folder = newFolder();
-      writeFileSync(join(folder, "config.json"), JSON.stringify({ org: "file-org" }));
-      const { api, logged } = fakeApi(folder, extra);
-      const world = await load(api);
-      expect(world.config).toEqual(effectiveConfig(atDefaults, {}, clirc));
-      expect(logged.map((entry) => entry.event)).toEqual(["needs_newer_prifly"]);
-      expect(logged[0]?.fields?.["missing"]).toBe("settings,state");
+describe("a prifly without settings, state or the vault-file feature", () => {
+  const missing: Needed[] = ["settings", "state", "vault-file"];
 
-      await choose(world, { org: "picked", sort: "freq" });
-      await changeState(world, (state) => linkIssue(state, "s1", "a", 1));
-      expect(world.config).toMatchObject({ org: "picked", sort: "freq" });
-      expect(world.state.links).toEqual({ s1: ["a"] });
-      await applySettings(world);
-      expect(world.config).toMatchObject({ org: "picked", sort: "freq" });
-      expect(readdirSync(folder)).toEqual(["config.json"]);
-      expect(logged).toHaveLength(1);
+  test("all three present is supported, any one missing is not", () => {
+    expect(supported(fakePrifly("/x").api)).toBe(true);
+    for (const lacks of missing) {
+      expect(supported(fakePrifly("/x", { without: [lacks] }).api)).toBe(false);
     }
   });
 
-  test("with settings but no state, only state is reported missing", async () => {
-    const { api, logged } = fakeApi(newFolder(), {
-      features: ["settings"],
-      settings: { ...atDefaults, org: "o" },
-    });
-    const world = await load(api);
-    expect(world.config.org).toBe("o");
-    expect(logged).toHaveLength(1);
-    expect(logged[0]?.fields?.["missing"]).toBe("state");
+  test("a feature named without the api behind it, or the api without the feature, is not supported", () => {
+    const api = fakePrifly("/x").api;
+    const { settings: _settings, ...noSettings } = api;
+    expect(supported(noSettings as typeof api)).toBe(false);
+    expect(supported({ ...api, features: ["settings", "state"] })).toBe(false);
+    expect(supported({ ...api, features: [] })).toBe(false);
+  });
+
+  test("the world is empty and nothing is read: no state, no vault, no network", async () => {
+    const realFetch = globalThis.fetch;
+    let calls = 0;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return Response.json({});
+    }) as unknown as typeof fetch;
+    try {
+      for (const lacks of missing) {
+        const folder = newFolder();
+        const fake = fakePrifly(folder, { without: [lacks] });
+        fake.entries.set("sentry", "sntryu_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+        const world = await load(fake.api);
+        expect(world.login).toBeNull();
+        expect(world.state).toEqual({ links: {}, linkedAt: {}, folders: {}, attempted: {} });
+        expect(fake.logs).toEqual([]);
+        expect(readdirSync(folder)).toEqual([]);
+      }
+      expect(calls).toBe(0);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   });
 });

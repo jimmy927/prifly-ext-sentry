@@ -5,7 +5,7 @@
  * self-hosted Sentry has no regions: its Base URL is used as it is.
  */
 
-import { hasState, parseChoices } from "./choices";
+import { parseChoices, stateStore } from "./choices";
 import { type Creds, organizations } from "./sentry";
 import type { World } from "./world";
 
@@ -63,12 +63,7 @@ export async function ensureRegion(world: World): Promise<void> {
 
 /** The organization's region, in force now and kept in the `choices` document. */
 async function keepRegion(world: World, org: string, regionUrl: string): Promise<void> {
-  const store = world.api.state;
-  if (store === undefined || !hasState(world.api)) {
-    world.choices = { ...world.choices, regions: { ...world.choices.regions, [org]: regionUrl } };
-    return;
-  }
-  const kept = await store.update<unknown>("choices", (current) => {
+  const kept = await stateStore(world.api).update<unknown>("choices", (current) => {
     const now = parseChoices(current);
     return { ...now, regions: { ...now.regions, [org]: regionUrl } };
   });

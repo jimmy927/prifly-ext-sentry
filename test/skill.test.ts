@@ -11,15 +11,19 @@ function settings(
   seed: string | null,
   base: string | null = null,
   rc: string | null = null,
+  authFile: string | null = null,
 ) {
   const dir = mkdtempSync(join(tmpdir(), "sentry-skill-"));
   const db = join(dir, "prifly.db");
-  // The script runs from a copy inside the temp dir, so the extension folder it
-  // looks in for auth.json is empty, whatever the checkout the tests run in holds.
+  // The script runs from a copy inside the temp dir, so what sits in the
+  // extension folder is only what a test puts there.
   const copied = join(dir, "ext", "skills", "sentry");
   mkdirSync(copied, { recursive: true });
   copyFileSync(join(skillDir, "sentry.py"), join(copied, "sentry.py"));
   if (rc !== null) writeFileSync(join(dir, ".sentryclirc"), rc);
+  if (authFile !== null) {
+    writeFileSync(join(dir, "ext", "auth.json"), JSON.stringify({ token: authFile }));
+  }
   const script = `
 import sqlite3, sys, json
 sys.path.insert(0, ${JSON.stringify(copied)})
@@ -64,14 +68,28 @@ describe("the sentry skill's organization", () => {
     ).toEqual(["https://flag.io/api/0", "t", "o"]);
   });
 
-  test("the default address in the row leaves ~/.sentryclirc's url in charge", () => {
+  test("~/.sentryclirc is not read: not its token, organization or address", () => {
+    const rc = "[auth]\ntoken=from-rc\n[defaults]\norg=rc-org\nurl=https://self.example\n";
     const row = JSON.stringify({ org: "o", baseUrl: "https://sentry.io" });
-    const rc = "[defaults]\nurl=https://self.example\n";
     expect(JSON.parse(settings({}, row, null, rc).out)).toEqual([
-      "https://self.example/api/0",
+      "https://sentry.io/api/0",
       "t",
       "o",
     ]);
+    // With no token in the environment the rc's token does not stand in.
+    expect(settings({ SENTRY_AUTH_TOKEN: "" }, row, null, rc).err).toContain(
+      "SENTRY_TOKEN is not set",
+    );
+    // Nor does the rc supply an organization.
+    expect(settings({}, JSON.stringify({ org: "" }), null, rc).err).toContain(
+      "no Sentry organization",
+    );
+  });
+
+  test("an auth.json in the extension's folder is not read", () => {
+    const row = JSON.stringify({ org: "o" });
+    const err = settings({ SENTRY_AUTH_TOKEN: "" }, row, null, null, "from-file").err;
+    expect(err).toContain("SENTRY_TOKEN is not set");
   });
 
   test("the token is SENTRY_AUTH_TOKEN, or SENTRY_TOKEN as vault_run sets it for the entry sentry", () => {
@@ -88,7 +106,8 @@ describe("the sentry skill's organization", () => {
   test("without any token it points at vault_run", () => {
     const row = JSON.stringify({ org: "o" });
     const err = settings({ SENTRY_AUTH_TOKEN: "" }, row).err;
-    expect(err).toContain('vault_run tool, entry "sentry"');
+    expect(err).toContain('vault_run tool with entry "sentry"');
+    expect(err).toContain("SENTRY_TOKEN is not set");
   });
 
   test("an empty value, a missing row or database falls through", () => {

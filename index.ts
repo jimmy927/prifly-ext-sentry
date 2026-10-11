@@ -14,14 +14,14 @@
  * There is nothing to configure by hand (the few plain settings are in prifly's
  * Extensions page; `settings.ts`). The first time you open the chooser
  * it offers the login, then your organizations. See `setup.ts` for that,
- * `auth.ts` for where the token comes
- * from, and `world.ts` for the small files this folder keeps.
+ * `auth.ts` for the token (prifly's vault), and `world.ts` for what is kept
+ * in prifly's database. A prifly without settings, state or the vault shows
+ * one "Update prifly" row and runs nothing else.
  */
 
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { findLogin, moveToVault, readClirc } from "./auth";
-import { hasSettings, issuesToStart, recentAttempts, starter } from "./auto-start";
+import { issuesToStart, recentAttempts, starter } from "./auto-start";
 import { mainCheckout } from "./checkout";
 import { eventId } from "./event";
 import { COLUMNS, issueChip, issueFace, issueItem, launcherFlag } from "./issue-face";
@@ -51,7 +51,7 @@ import {
   type StatusChange,
   setStatus,
 } from "./sentry";
-import { isSetupKey, runSetup, setupChoices, setupTail } from "./setup";
+import { isSetupKey, rejectedRows, runSetup, setupChoices, setupTail } from "./setup";
 import { shortDate } from "./time";
 import {
   applySettings,
@@ -61,15 +61,22 @@ import {
   load,
   ready,
   reload,
+  supported,
   unlinkIssue,
   type World,
-  withUser,
 } from "./world";
 
 let world: World | null = null;
 
 export async function activate(api: ExtensionApi): Promise<() => void> {
   world = await load(api);
+  // Settings, state or the vault missing: the chooser says to update prifly
+  // (`setupChoices`), and nothing else runs — no timer, no Sentry calls.
+  if (!supported(api)) {
+    return () => {
+      world = null;
+    };
+  }
   let stopped = false;
   const tick = async () => {
     try {
@@ -90,44 +97,25 @@ export async function activate(api: ExtensionApi): Promise<() => void> {
   let timer = setInterval(() => {
     if (!stopped) void tick();
   }, every * 1000);
-  // Where prifly keeps settings, the Extensions page decides (`settings.ts`);
-  // the list is read again with whatever the reader changed.
-  if (hasSettings(api)) {
-    api.onSettings?.(() => {
-      const at = world;
-      if (at === null) return;
-      void (async () => {
-        await applySettings(at);
-        at.loadedAt = 0;
-        api.log("settings", { org: at.config.org, startSessions: at.config.startSessions.enabled });
-        if (at.config.refreshSeconds !== every) {
-          every = at.config.refreshSeconds;
-          clearInterval(timer);
-          timer = setInterval(() => {
-            if (!stopped) void tick();
-          }, every * 1000);
-        }
-        await tick();
-      })().catch((caught) => api.log("settings_failed", { message: message(caught) }));
-    });
-  }
-  // A token still in auth.json moves into prifly's vault, in the background:
-  // the reader's answer on the card can take any time, and until then (and
-  // after a "no") auth.json keeps the extension working.
-  const started = world;
-  void moveToVault(api, api.folder, started.config.baseUrl)
-    .then(async (outcome) => {
-      api.log("vault_move", { outcome });
-      if (outcome !== "moved" || stopped || world !== started) return;
-      started.login = await withUser(
-        api,
-        started.config,
-        await findLogin(api.folder, Bun.env, await readClirc(), api),
-      );
-      started.loadedAt = 0;
+  // The Extensions page decides the settings (`settings.ts`); the list is
+  // read again with whatever the reader changed.
+  api.onSettings?.(() => {
+    const at = world;
+    if (at === null) return;
+    void (async () => {
+      applySettings(at);
+      at.loadedAt = 0;
+      api.log("settings", { org: at.config.org, startSessions: at.config.startSessions.enabled });
+      if (at.config.refreshSeconds !== every) {
+        every = at.config.refreshSeconds;
+        clearInterval(timer);
+        timer = setInterval(() => {
+          if (!stopped) void tick();
+        }, every * 1000);
+      }
       await tick();
-    })
-    .catch((caught) => api.log("vault_move_failed", { message: message(caught) }));
+    })().catch((caught) => api.log("settings_failed", { message: message(caught) }));
+  });
   await tick();
   return () => {
     stopped = true;
@@ -244,6 +232,16 @@ export async function choices(
   query: string,
 ): Promise<LaunchChoice[] | LaunchBoard> {
   const at = here();
+  try {
+    return await chooser(at, query);
+  } catch (caught) {
+    // A saved token Sentry refuses is no dead end: say so and offer a new one.
+    if (caught instanceof SentryError && caught.status === 401) return rejectedRows(at);
+    throw caught;
+  }
+}
+
+async function chooser(at: World, query: string): Promise<LaunchChoice[] | LaunchBoard> {
   const setup = await setupChoices(at);
   if (setup !== null) return setup;
   if (at.loadedAt === 0) await reload(at);

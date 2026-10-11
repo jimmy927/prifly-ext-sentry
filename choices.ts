@@ -6,9 +6,10 @@
 import type { ExtensionApi } from "./prifly-api";
 import { obj } from "./read";
 
-/** Whether this prifly keeps extension state in its database (`api.state`). */
-export function hasState(api: ExtensionApi): boolean {
-  return (api.features ?? []).includes("state") && api.state !== undefined;
+/** prifly's `api.state`; a prifly that is not `supported` (`world.ts`) never gets here. */
+export function stateStore(api: ExtensionApi): NonNullable<ExtensionApi["state"]> {
+  if (api.state === undefined) throw new Error("This prifly keeps no extension state.");
+  return api.state;
 }
 
 /**

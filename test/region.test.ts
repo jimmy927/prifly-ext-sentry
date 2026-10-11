@@ -37,7 +37,6 @@ function memoryState(docs: Map<string, unknown>) {
       docs.set(name, next);
       return copy(next);
     },
-    importOnce: async () => undefined,
   } as unknown as NonNullable<ExtensionApi["state"]>;
 }
 
@@ -49,7 +48,13 @@ function world(org: string, baseUrl: string, docs = new Map<string, unknown>()):
     log: () => undefined,
     folder: "/tmp/fake-sentry-ext",
     paths: [],
-    features: ["settings", "state"],
+    features: ["settings", "state", "vault-file"],
+    settings: {},
+    vault: {
+      read: async () => null,
+      file: async () => ({ outcome: "declined" }),
+      forget: async () => false,
+    },
     state: memoryState(docs),
   } as unknown as ExtensionApi;
   return {
@@ -65,7 +70,7 @@ function world(org: string, baseUrl: string, docs = new Map<string, unknown>()):
       startSessions: { enabled: false, levels: ["fatal", "error"], maxPerDay: 10, maxAgeHours: 24 },
     },
     choices: {},
-    login: { token: "sntryu_x", user: "me", source: "auth.json" },
+    login: { token: "sntryu_x", user: "me" },
     state: { links: {}, folders: {}, linkedAt: {}, attempted: {} },
     issues: [],
     mappings: [],
