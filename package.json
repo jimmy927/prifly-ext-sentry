@@ -1,6 +1,7 @@
 {
   "name": "prifly-ext-sentry",
   "private": true,
+  "license": "FSL-1.1-ALv2",
   "type": "module",
   "description": "A prifly extension: start a session from a Sentry issue, and keep the issue on its banner.",
   "scripts": {
