@@ -219,7 +219,7 @@ is not started: the New session form would have asked for the folder.
   cookies); contexts; the tags the rest does not already say. The issue and
   the event are saved whole as `issues/<SHORT-ID>/issue.json` and
   `issues/<SHORT-ID>/event-<id>.json`, and the prompt says where.
-- **A chip on the session** — `ODI-GC6: AssertionError: No ref for…`, its
+- **A chip on the session** — `PROJ-1A2: AssertionError: No ref for…`, its
   status (and substatus), level, counts and last seen on hover. It links to the
   issue, and its menu resolves it, archives it until it escalates, or reopens
   it. It keeps showing the issue's current status after it leaves the
@@ -251,7 +251,7 @@ bun install
 bun test          # unit tests; the live ones skip without a token
 bun run typecheck
 bun run check     # biome, with prifly's limits
-SENTRY_AUTH_TOKEN=sntryu_… SENTRY_LIVE_ORG=morpheus-0r SENTRY_LIVE_PROJECT=odi bun test live   # GET only
+SENTRY_AUTH_TOKEN=sntryu_… SENTRY_LIVE_ORG=your-org SENTRY_LIVE_PROJECT=your-project bun test live   # GET only
 ```
 
 `prifly-api.ts` is a copy of prifly's extension contract

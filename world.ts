@@ -42,7 +42,7 @@ import { settingsRaw, type Values } from "./settings";
 export { type Choice, type Choices, parseChoices } from "./choices";
 
 export type Config = {
-  /** The organization's slug: `morpheus-0r`. "" until chosen. */
+  /** The organization's slug: `your-org`. "" until chosen. */
   org: string;
   /** `https://sentry.io`, or a self-hosted Sentry's address. */
   baseUrl: string;

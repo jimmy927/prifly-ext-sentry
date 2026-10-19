@@ -156,7 +156,7 @@ class Api:
             sys.exit(f"Sentry {method} {path}: {err.code} {err.read()[:300].decode(errors='replace')}")
 
     def issue_id(self, ref: str) -> str:
-        """A numeric id, a short id (ODI-GC6) or an issue URL, as the numeric id."""
+        """A numeric id, a short id (PROJ-1A2) or an issue URL, as the numeric id."""
         ref = ref.strip()
         found = re.search(r"/issues/(\d+)", ref)
         if found:

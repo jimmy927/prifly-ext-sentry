@@ -1,6 +1,6 @@
 ---
 name: sentry
-description: Search Sentry issues, read an issue with its latest event and stack trace, list an issue's events, save an event's full JSON, and resolve or archive an issue when explicitly asked. Use when the user mentions a Sentry issue (ODI-GC6, a sentry.io/issues/… link), asks what is erroring in production, or wants the stack trace, breadcrumbs or request behind an error.
+description: Search Sentry issues, read an issue with its latest event and stack trace, list an issue's events, save an event's full JSON, and resolve or archive an issue when explicitly asked. Use when the user mentions a Sentry issue (PROJ-1A2, a sentry.io/issues/… link), asks what is erroring in production, or wants the stack trace, breadcrumbs or request behind an error.
 ---
 
 ## Sentry
@@ -21,24 +21,24 @@ python3 <this skill's folder>/sentry.py search "is:resolved release:abc123" --pe
 python3 <this skill's folder>/sentry.py search "level:fatal" --json
 
 # One issue: status, counts, notes, and its latest event (in-app frames, breadcrumbs, request, tags)
-python3 <this skill's folder>/sentry.py issue ODI-GC6
+python3 <this skill's folder>/sentry.py issue PROJ-1A2
 python3 <this skill's folder>/sentry.py issue https://your-org.sentry.io/issues/7291288169/
 
 # An issue's events, newest first — to see whether it is one user, one release, one host
-python3 <this skill's folder>/sentry.py events ODI-GC6 --limit 20
+python3 <this skill's folder>/sentry.py events PROJ-1A2 --limit 20
 
 # One event: latest (default), oldest, recommended, or an event id
-python3 <this skill's folder>/sentry.py event ODI-GC6 oldest
-python3 <this skill's folder>/sentry.py event ODI-GC6 a620bd05fa524911a1e8f64a6bc4793a --full   # every frame
-python3 <this skill's folder>/sentry.py event ODI-GC6 --out /tmp/sentry-ODI-GC6.json            # whole JSON, for jq
+python3 <this skill's folder>/sentry.py event PROJ-1A2 oldest
+python3 <this skill's folder>/sentry.py event PROJ-1A2 3f9c1e7a5b2d4c8e9a0b6d1f7e3c5a42 --full   # every frame
+python3 <this skill's folder>/sentry.py event PROJ-1A2 --out sentry-PROJ-1A2.json            # whole JSON, for jq
 
 # Writes — ONLY when the user explicitly asked for this issue to be resolved / archived / reopened
-python3 <this skill's folder>/sentry.py resolve ODI-GC6
-python3 <this skill's folder>/sentry.py ignore ODI-GC6      # archive until it escalates
-python3 <this skill's folder>/sentry.py unresolve ODI-GC6
+python3 <this skill's folder>/sentry.py resolve PROJ-1A2
+python3 <this skill's folder>/sentry.py ignore PROJ-1A2      # archive until it escalates
+python3 <this skill's folder>/sentry.py unresolve PROJ-1A2
 ```
 
-Issues are accepted as a short id (`ODI-GC6`), a numeric id, or an issue URL.
+Issues are accepted as a short id (`PROJ-1A2`), a numeric id, or an issue URL (`https://your-org.sentry.io/issues/1234567890/`).
 
 ### How to work an issue
 
