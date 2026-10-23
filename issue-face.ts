@@ -110,7 +110,7 @@ export function statusActions(issue: Issue): DecorationAction[] {
 }
 
 /**
- * The line at the foot of the card: `ODI-GC6 · 3 users · 3d ago`. The culprit
+ * The line at the foot of the card: `PROJ-1A2 · 3 users · 3d ago`. The culprit
  * has its own line and the bars say how many events; without bars, the
  * events and the culprit are said here instead.
  */

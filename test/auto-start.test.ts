@@ -6,7 +6,6 @@ import {
   type Attempt,
   DAY_MS,
   DEFAULT_START_SESSIONS,
-  hasSettings,
   issuesToStart,
   parseStartSessions,
   type StartSessions,
@@ -16,6 +15,7 @@ import { startNew } from "../index";
 import type { ExtensionApi, StartAnswer } from "../prifly-api";
 import { type Issue, readIssue } from "../sentry";
 import { linkIssue, parseConfig, parseState, unlinkIssue, type World } from "../world";
+import { fakeState } from "./fake-state";
 import { NOW, rawIssue } from "./fixtures";
 
 const base = readIssue(rawIssue);
@@ -63,8 +63,7 @@ describe("parseStartSessions", () => {
   });
 
   test("is part of the config", () => {
-    const clirc = { token: "", org: "", url: "" };
-    expect(parseConfig({}, {}, clirc, "/h").startSessions).toEqual(DEFAULT_START_SESSIONS);
+    expect(parseConfig({}, "/h").startSessions).toEqual(DEFAULT_START_SESSIONS);
   });
 });
 
@@ -79,13 +78,6 @@ describe("startSessionsFrom", () => {
       }),
     ).toEqual({ enabled: true, levels: ["fatal"], maxPerDay: 3, maxAgeHours: 48 });
     expect(startSessionsFrom({})).toEqual(DEFAULT_START_SESSIONS);
-  });
-
-  test("they count only where prifly says it keeps settings", () => {
-    const api = (over: object) => ({ ...over }) as unknown as ExtensionApi;
-    expect(hasSettings(api({ features: ["settings"], settings: {} }))).toBe(true);
-    expect(hasSettings(api({ features: [], settings: {} }))).toBe(false);
-    expect(hasSettings(api({ features: ["settings"] }))).toBe(false);
   });
 });
 
@@ -183,6 +175,7 @@ function fakeWorld(features: string[] | undefined, withStart = true) {
   const api = {
     folder: mkdtempSync(join(tmpdir(), "sentry-auto-start-")),
     features,
+    state: fakeState(),
     sessions: () => [],
     log: (event: string, fields?: Record<string, unknown>) => {
       if (event === "auto_start") logged.push(fields ?? {});
@@ -196,10 +189,10 @@ function fakeWorld(features: string[] | undefined, withStart = true) {
         }
       : {}),
   } as unknown as ExtensionApi;
-  const clirc = { token: "", org: "", url: "" };
   const world: World = {
     api,
-    config: { ...parseConfig({}, {}, clirc, "/h"), startSessions: on },
+    config: { ...parseConfig({}, "/h"), startSessions: on },
+    choices: {},
     login: null,
     state: parseState({}),
     issues: [issue("a")],

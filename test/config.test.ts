@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { join } from "node:path";
-import { looksLikeToken, parseClirc } from "../auth";
+import { looksLikeToken } from "../auth";
 import { alreadyStarted, matches } from "../index";
 import { columnOf, issueChip, issueFace, statusActions } from "../issue-face";
 import { readIssue, readNotes, shortRelease } from "../sentry";
@@ -16,11 +16,9 @@ import {
 } from "../world";
 import { NOW, rawIssue } from "./fixtures";
 
-const noClirc = { token: "", org: "", url: "" };
-
 describe("parseConfig", () => {
-  test("an empty file gives the defaults", () => {
-    expect(parseConfig({}, {}, noClirc, "/home/me")).toEqual({
+  test("empty settings give the defaults", () => {
+    expect(parseConfig({}, "/home/me")).toEqual({
       org: "",
       baseUrl: "https://sentry.io",
       projects: {},
@@ -35,26 +33,24 @@ describe("parseConfig", () => {
   test("maps projects to folders, expanding ~ and dropping what is not a folder", () => {
     const config = parseConfig(
       { org: "acme", projects: { odi: "~/odi", web: "/srv/web", bad: 3, empty: " " } },
-      {},
-      noClirc,
       "/home/me",
     );
     expect(config.org).toBe("acme");
     expect(config.projects).toEqual({ odi: join("/home/me", "odi"), web: "/srv/web" });
   });
 
-  test("the organization and server fall back to the environment, then ~/.sentryclirc", () => {
-    const clirc = { token: "t", org: "from-rc", url: "https://sentry.example.com/" };
-    expect(parseConfig({}, {}, clirc, "/h").org).toBe("from-rc");
-    expect(parseConfig({}, {}, clirc, "/h").baseUrl).toBe("https://sentry.example.com");
-    expect(parseConfig({}, { SENTRY_ORG: "from-env" }, clirc, "/h").org).toBe("from-env");
+  test("the server's trailing slash is dropped; an empty one is sentry.io", () => {
+    expect(parseConfig({ baseUrl: "https://sentry.example.com/" }, "/h").baseUrl).toBe(
+      "https://sentry.example.com",
+    );
+    expect(parseConfig({ baseUrl: "" }, "/h").baseUrl).toBe("https://sentry.io");
   });
 
   test("an unknown sort is the default, and refreshing is never faster than 30s", () => {
-    const config = parseConfig({ sort: "random", refreshSeconds: 1 }, {}, noClirc, "/h");
+    const config = parseConfig({ sort: "random", refreshSeconds: 1 }, "/h");
     expect(config.sort).toBe("date");
     expect(config.refreshSeconds).toBe(30);
-    expect(parseConfig({ sort: "freq" }, {}, noClirc, "/h").sort).toBe("freq");
+    expect(parseConfig({ sort: "freq" }, "/h").sort).toBe("freq");
   });
 
   test("expandHome leaves absolute and relative paths alone", () => {
@@ -87,7 +83,7 @@ describe("parseState", () => {
     ).toEqual({ a: { at: 5, started: true } });
   });
 
-  test("reads a one-issue link from an older state.json as a list of one", () => {
+  test("reads a one-issue link from older state as a list of one", () => {
     expect(parseState({ links: { s1: "5001" } }).links).toEqual({ s1: ["5001"] });
   });
 });
@@ -115,25 +111,6 @@ describe("linkIssue and unlinkIssue", () => {
 });
 
 describe("auth", () => {
-  test("parseClirc reads the token, org and url from their sections", () => {
-    const text = [
-      "; sentry-cli",
-      "[auth]",
-      "token = sntryu_abc",
-      "[defaults]",
-      'org="acme"',
-      "url=https://sentry.io/",
-      "[other]",
-      "token=not-this-one",
-    ].join("\n");
-    expect(parseClirc(text)).toEqual({
-      token: "sntryu_abc",
-      org: "acme",
-      url: "https://sentry.io/",
-    });
-    expect(parseClirc("")).toEqual(noClirc);
-  });
-
   test("looksLikeToken takes personal, org and legacy tokens and nothing with spaces", () => {
     expect(looksLikeToken(`sntryu_${"a".repeat(64)}`)).toBe(true);
     expect(looksLikeToken(`sntrys_${"b".repeat(40)}==`)).toBe(true);

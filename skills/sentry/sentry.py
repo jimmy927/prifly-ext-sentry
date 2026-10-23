@@ -3,72 +3,119 @@
 Sentry CLI for Claude Code sessions: search issues, read an issue and an
 event, list an issue's events, and resolve / archive / reopen an issue.
 
-Credentials, in order: SENTRY_AUTH_TOKEN; the prifly Sentry extension's
-auth.json (the token the reader pasted into prifly's "From a Sentry issue…");
-~/.sentryclirc's [auth] token (what `sentry-cli login` writes). The
-organization: --org, SENTRY_ORG, the extension's config.json, then
-~/.sentryclirc's [defaults] org. Standard library only.
+The token comes only from the environment: SENTRY_TOKEN or SENTRY_AUTH_TOKEN.
+The reader's login lives in prifly's vault as the entry "sentry" (the token they
+pasted into prifly's "From a Sentry issue…"): run this script through the
+vault_run tool with entry "sentry", which hands the token over as SENTRY_TOKEN
+(the name the vault gives an api-token entry called "sentry"). Outside prifly
+set SENTRY_AUTH_TOKEN yourself.
+
+The organization and address: --org / --base-url, SENTRY_ORG / SENTRY_URL, then
+the Sentry extension's settings in prifly's database (read-only). Standard
+library only.
 """
 
 from __future__ import annotations
 
 import argparse
-import configparser
 import json
 import os
 import re
+import sqlite3
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import Any
 
 HOME = Path.home()
 
 
-def extension_roots() -> list[Path]:
-    """This file's own extension first, then the one prifly runs (a plugin copy has no auth.json)."""
-    here = Path(__file__).resolve().parent.parent.parent
-    named = os.environ.get("PRIFLY_SENTRY_HOME")
-    installed = HOME / ".local/share/prifly/extensions/prifly-ext-sentry"
-    roots = ([Path(named)] if named else []) + [here, installed]
-    return list(dict.fromkeys(roots))
+def prifly_data_dir(platform: str | None = None, env: dict[str, str] | None = None, home: str | Path | None = None) -> str:
+    """Where prifly keeps its per-user data, as the host decides it (apps/desktop-host/src/platform/data-dir.ts).
+
+    Linux and WSL: $XDG_DATA_HOME/prifly (~/.local/share/prifly when unset);
+    macOS: ~/Library/Application Support/prifly;
+    Windows: %LOCALAPPDATA%\\prifly\\host (~\\AppData\\Local when unset).
+    prifly sets no environment variable naming this folder for its sessions;
+    only PRIFLY_DB (see prifly_db), which the host itself reads, can point elsewhere.
+    """
+    platform = sys.platform if platform is None else platform
+    env = dict(os.environ) if env is None else env
+    home = HOME if home is None else home
+    if platform == "win32":
+        local = env.get("LOCALAPPDATA") or str(PureWindowsPath(str(home), "AppData", "Local"))
+        return str(PureWindowsPath(local, "prifly", "host"))
+    if platform == "darwin":
+        return str(PurePosixPath(str(home), "Library", "Application Support", "prifly"))
+    xdg = env.get("XDG_DATA_HOME")
+    return str(PurePosixPath(xdg or str(PurePosixPath(str(home), ".local", "share")), "prifly"))
 
 
-def read_json(name: str, field: str) -> str:
-    for root in extension_roots():
-        try:
-            found = json.loads((root / name).read_text()).get(field)
-        except (OSError, ValueError):
-            continue
-        if found:
-            return str(found)
-    return ""
+def prifly_db(platform: str | None = None, env: dict[str, str] | None = None, home: str | Path | None = None) -> str:
+    """prifly's database file: $PRIFLY_DB when set, else prifly.db in its data folder."""
+    env = dict(os.environ) if env is None else env
+    if env.get("PRIFLY_DB"):
+        return env["PRIFLY_DB"]
+    if (sys.platform if platform is None else platform) == "win32":
+        return str(PureWindowsPath(prifly_data_dir(platform, env, home), "prifly.db"))
+    return str(PurePosixPath(prifly_data_dir(platform, env, home), "prifly.db"))
 
 
-def clirc(section: str, key: str) -> str:
-    parser = configparser.ConfigParser()
+def prifly_setting(field: str) -> str:
+    """A text setting of the prifly Sentry extension, read from prifly's database.
+
+    Read-only; any failure (no file, locked, no row, bad JSON) gives "".
+    """
+    row = db_value("select value from settings where key = 'prifly.extensions.settings.sentry'")
+    found = row.get(field) if isinstance(row, dict) else None
+    return found.strip() if isinstance(found, str) else ""
+
+
+def db_value(query: str) -> Any:
+    """The JSON in the first column of the query's first row of prifly's database, opened read-only; None on any failure."""
     try:
-        parser.read(HOME / ".sentryclirc")
-        return parser.get(section, key, fallback="").strip().strip("\"'")
-    except configparser.Error:
-        return ""
+        path = Path(prifly_db())
+        uri = path.as_uri() if path.is_absolute() else f"file:{urllib.parse.quote(str(path))}"
+        con = sqlite3.connect(f"{uri}?mode=ro", uri=True, timeout=1)
+        try:
+            row = con.execute(query).fetchone()
+        finally:
+            con.close()
+        return json.loads(row[0]) if row else None
+    except (sqlite3.Error, ValueError, TypeError, OSError):
+        return None
 
 
-def settings(org_flag: str | None) -> tuple[str, str, str]:
+def stored_region(org: str) -> str:
+    """The data region (https://de.sentry.io) the extension kept for this organization in prifly's database, or ""."""
+    choices = db_value(
+        "select value from extension_state where extension_id = 'sentry' and name = 'choices'"
+    )
+    regions = choices.get("regions") if isinstance(choices, dict) else None
+    found = regions.get(org) if isinstance(regions, dict) else None
+    return found.strip() if isinstance(found, str) else ""
+
+
+def settings(org_flag: str | None, base_flag: str | None = None) -> tuple[str, str, str]:
     """The API root, the token and the organization."""
-    token = os.environ.get("SENTRY_AUTH_TOKEN") or read_json("auth.json", "token") or clirc("auth", "token")
+    token = os.environ.get("SENTRY_AUTH_TOKEN") or os.environ.get("SENTRY_TOKEN")
     if not token:
         sys.exit(
-            "not logged in to Sentry: open prifly, click 'From a Sentry issue…' and log in "
-            "(or set SENTRY_AUTH_TOKEN, or run `sentry-cli login`)"
+            "SENTRY_TOKEN is not set. Inside prifly, run this script through the vault_run "
+            "tool with entry \"sentry\" (log in first from \"From a Sentry issue…\"). Outside "
+            "prifly, set SENTRY_AUTH_TOKEN (or SENTRY_TOKEN) to your Sentry token."
         )
-    base = os.environ.get("SENTRY_URL") or read_json("config.json", "baseUrl") or clirc("defaults", "url")
-    org = org_flag or os.environ.get("SENTRY_ORG") or read_json("config.json", "org") or clirc("defaults", "org")
+    base = base_flag or os.environ.get("SENTRY_URL") or prifly_setting("baseUrl")
+    org = org_flag or os.environ.get("SENTRY_ORG") or prifly_setting("org")
     if not org:
-        sys.exit("no Sentry organization: pass --org, or choose one in prifly's 'From a Sentry issue…'")
-    return (base or "https://sentry.io").rstrip("/") + "/api/0", token, org
+        sys.exit("no Sentry organization: pass --org, or choose it in prifly's Extensions dialog (Sentry issues), or set SENTRY_ORG")
+    base = (base or "https://sentry.io").rstrip("/")
+    if base == "https://sentry.io":
+        # The default address: the organization's data region, when the extension kept one (an EU organization is on de.sentry.io).
+        base = stored_region(org).rstrip("/") or base
+    return base + "/api/0", token, org
 
 
 def needed_permission(method: str, path: str) -> str:
@@ -109,7 +156,7 @@ class Api:
             sys.exit(f"Sentry {method} {path}: {err.code} {err.read()[:300].decode(errors='replace')}")
 
     def issue_id(self, ref: str) -> str:
-        """A numeric id, a short id (ODI-GC6) or an issue URL, as the numeric id."""
+        """A numeric id, a short id (PROJ-1A2) or an issue URL, as the numeric id."""
         ref = ref.strip()
         found = re.search(r"/issues/(\d+)", ref)
         if found:
@@ -250,6 +297,7 @@ def cmd_status(api: Api, a: argparse.Namespace) -> None:
 def main() -> None:
     p = argparse.ArgumentParser(prog="sentry.py", description=__doc__)
     p.add_argument("--org")
+    p.add_argument("--base-url", dest="base_url", help="the Sentry address (self-hosted)")
     sub = p.add_subparsers(dest="cmd", required=True)
     s = sub.add_parser("search", help="search issues (Sentry search syntax; is:unresolved unless an is: is given)")
     s.add_argument("query", nargs="*")
@@ -274,7 +322,7 @@ def main() -> None:
         w = sub.add_parser(name, help=f"{name} an issue (a write: only when the user asked for it)")
         w.add_argument("issue")
     a = p.parse_args()
-    api = Api(*settings(a.org))
+    api = Api(*settings(a.org, a.base_url))
     handlers = {"search": cmd_search, "issue": cmd_issue, "event": cmd_event, "events": cmd_events}
     handlers.get(a.cmd, cmd_status)(api, a)
 

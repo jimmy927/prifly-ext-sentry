@@ -11,21 +11,17 @@
  * stays on that session's banner: click it to open it in Sentry, or use its
  * menu to resolve or archive it when the work is done.
  *
- * There is nothing to configure by hand. The first time you open the chooser
+ * There is nothing to configure by hand (the few plain settings are in prifly's
+ * Extensions page; `settings.ts`). The first time you open the chooser
  * it offers the login, then your organizations. See `setup.ts` for that,
- * `auth.ts` for where the token comes
- * from, and `world.ts` for the small files this folder keeps.
+ * `auth.ts` for the token (prifly's vault), and `world.ts` for what is kept
+ * in prifly's database. A prifly without settings, state or the vault shows
+ * one "Update prifly" row and runs nothing else.
  */
 
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import {
-  hasSettings,
-  issuesToStart,
-  recentAttempts,
-  starter,
-  startSessionsFrom,
-} from "./auto-start";
+import { issuesToStart, recentAttempts, starter } from "./auto-start";
 import { mainCheckout } from "./checkout";
 import { eventId } from "./event";
 import { COLUMNS, issueChip, issueFace, issueItem, launcherFlag } from "./issue-face";
@@ -44,6 +40,7 @@ import type {
   StartAnswer,
 } from "./prifly-api";
 import { clip } from "./read";
+import { apiBase, orgCreds } from "./region";
 import {
   type Creds,
   type Issue,
@@ -54,33 +51,31 @@ import {
   type StatusChange,
   setStatus,
 } from "./sentry";
-import { isSetupKey, runSetup, setupChoices, setupTail } from "./setup";
+import { isSetupKey, rejectedRows, runSetup, setupChoices, setupTail } from "./setup";
 import { shortDate } from "./time";
 import {
+  applySettings,
+  changeState,
   checkoutOf,
-  creds,
   linkIssue,
   load,
   ready,
   reload,
+  supported,
   unlinkIssue,
   type World,
-  writeState,
 } from "./world";
 
 let world: World | null = null;
 
 export async function activate(api: ExtensionApi): Promise<() => void> {
   world = await load(api);
-  // Where prifly keeps settings, the Extensions page decides; config.json's
-  // `startSessions` is for an older prifly.
-  if (hasSettings(api) && api.settings !== undefined) {
-    world.config.startSessions = startSessionsFrom(api.settings);
-    api.onSettings?.((values) => {
-      if (world === null) return;
-      world.config.startSessions = startSessionsFrom(values);
-      api.log("settings", { startSessions: world.config.startSessions.enabled });
-    });
+  // Settings, state or the vault missing: the chooser says to update prifly
+  // (`setupChoices`), and nothing else runs — no timer, no Sentry calls.
+  if (!supported(api)) {
+    return () => {
+      world = null;
+    };
   }
   let stopped = false;
   const tick = async () => {
@@ -98,10 +93,30 @@ export async function activate(api: ExtensionApi): Promise<() => void> {
       api.log("refresh_failed", { message: message(caught) });
     }
   };
-  await tick();
-  const timer = setInterval(() => {
+  let every = world.config.refreshSeconds;
+  let timer = setInterval(() => {
     if (!stopped) void tick();
-  }, world.config.refreshSeconds * 1000);
+  }, every * 1000);
+  // The Extensions page decides the settings (`settings.ts`); the list is
+  // read again with whatever the reader changed.
+  api.onSettings?.(() => {
+    const at = world;
+    if (at === null) return;
+    void (async () => {
+      applySettings(at);
+      at.loadedAt = 0;
+      api.log("settings", { org: at.config.org, startSessions: at.config.startSessions.enabled });
+      if (at.config.refreshSeconds !== every) {
+        every = at.config.refreshSeconds;
+        clearInterval(timer);
+        timer = setInterval(() => {
+          if (!stopped) void tick();
+        }, every * 1000);
+      }
+      await tick();
+    })().catch((caught) => api.log("settings_failed", { message: message(caught) }));
+  });
+  await tick();
   return () => {
     stopped = true;
     clearInterval(timer);
@@ -172,7 +187,10 @@ export function handledIssues(at: World): Set<string> {
 export async function startNew(at: World, now: number): Promise<void> {
   const start = starter(at.api);
   if (start === undefined || !at.config.startSessions.enabled) return;
-  at.state.attempted = recentAttempts(at.state.attempted, now);
+  const prune = (state: World["state"]) => {
+    state.attempted = recentAttempts(state.attempted, now);
+  };
+  prune(at.state);
   const due = issuesToStart(
     at.issues,
     handledIssues(at),
@@ -182,14 +200,19 @@ export async function startNew(at: World, now: number): Promise<void> {
   );
   for (const issue of due) {
     // Kept before asking, so a poll that overlaps this one does not ask again.
-    at.state.attempted[issue.id] = { at: now, started: false };
+    await changeState(at, (state) => {
+      prune(state);
+      state.attempted[issue.id] = { at: now, started: false };
+    });
     let answer: StartAnswer;
     try {
       answer = await start("issue", issue.id);
     } catch (caught) {
       answer = { started: false, reason: message(caught) };
     }
-    at.state.attempted[issue.id] = { at: now, started: answer.started };
+    await changeState(at, (state) => {
+      state.attempted[issue.id] = { at: now, started: answer.started };
+    });
     at.api.log("auto_start", {
       issue: issue.shortId,
       started: answer.started,
@@ -197,7 +220,6 @@ export async function startNew(at: World, now: number): Promise<void> {
       reason: answer.started ? null : answer.reason,
     });
   }
-  if (due.length > 0) await writeState(at.api.folder, at.state);
 }
 
 /**
@@ -210,6 +232,16 @@ export async function choices(
   query: string,
 ): Promise<LaunchChoice[] | LaunchBoard> {
   const at = here();
+  try {
+    return await chooser(at, query);
+  } catch (caught) {
+    // A saved token Sentry refuses is no dead end: say so and offer a new one.
+    if (caught instanceof SentryError && caught.status === 401) return rejectedRows(at);
+    throw caught;
+  }
+}
+
+async function chooser(at: World, query: string): Promise<LaunchChoice[] | LaunchBoard> {
   const setup = await setupChoices(at);
   if (setup !== null) return setup;
   if (at.loadedAt === 0) await reload(at);
@@ -304,7 +336,7 @@ export function matches(issue: Issue, words: string): boolean {
 }
 
 function needCreds(at: World): Creds {
-  const auth = creds(at);
+  const auth = orgCreds(at);
   if (auth === null) throw new Error("Not logged in to Sentry.");
   return auth;
 }
@@ -394,7 +426,15 @@ async function issueLaunch(at: World, key: string): Promise<Launch> {
     cwd: checkout.folder,
   });
   const seeded: Launch = {
-    prompt: issuePrompt({ issue, event, folder, files, now: Date.now() }),
+    prompt: issuePrompt({
+      issue,
+      event,
+      folder,
+      files,
+      now: Date.now(),
+      org: at.config.org,
+      baseUrl: apiBase(at),
+    }),
     name: clip(issue.title, 60),
   };
   // Found nowhere, the New session form asks, and `launched` remembers the answer.
@@ -418,12 +458,13 @@ export function safeName(name: string): string {
  */
 export async function launched(_launchId: string, key: string, sessionId: string): Promise<void> {
   const at = here();
-  linkIssue(at.state, sessionId, key);
   const issue = at.issues.find((entry) => entry.id === key) ?? at.linked.get(key);
   const cwd = at.api.sessions().find((session) => session.id === sessionId)?.cwd ?? "";
   const top = cwd === "" ? "" : mainCheckout(cwd);
-  if (issue !== undefined && top !== "") at.state.folders[issue.project] = top;
-  await writeState(at.api.folder, at.state);
+  await changeState(at, (state) => {
+    linkIssue(state, sessionId, key);
+    if (issue !== undefined && top !== "") state.folders[issue.project] = top;
+  });
   if (issue !== undefined) at.linked.set(key, issue);
   show();
 }
@@ -468,8 +509,7 @@ export async function action(
  * share a cause, like a failed backup step and the failed upload behind it.
  */
 async function link(at: World, key: string, sessionId: string): Promise<string> {
-  linkIssue(at.state, sessionId, key);
-  await writeState(at.api.folder, at.state);
+  await changeState(at, (state) => linkIssue(state, sessionId, key));
   const issue = at.issues.find((entry) => entry.id === key) ?? at.linked.get(key);
   if (issue !== undefined) at.linked.set(key, issue);
   show();
@@ -487,8 +527,7 @@ function unlinkAction(sessionId: string): DecorationAction {
 
 /** A link made by mistake, undone from the chip: the issue itself is left alone in Sentry. */
 async function unlink(at: World, key: string, sessionId: string): Promise<string> {
-  unlinkIssue(at.state, sessionId, key);
-  await writeState(at.api.folder, at.state);
+  await changeState(at, (state) => unlinkIssue(state, sessionId, key));
   show();
   at.api.log("unlinked", { issue: key, session: sessionId.slice(0, 8) });
   const issue = at.linked.get(key) ?? at.issues.find((entry) => entry.id === key);

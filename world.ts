@@ -1,21 +1,30 @@
 /**
  * What this extension knows while it runs, and what it keeps between runs.
  *
- * Three small files sit next to this one, none of them in git: `config.json`
- * (the organization and how the list is sorted), `auth.json` (the reader's
- * own token, when it was pasted here — `auth.ts`), and `state.json` (which
- * session was started from which issue, and which folder each project's
- * sessions were last started in). Saved events go under `issues/`, also out
- * of git.
+ * The plain settings come from prifly's Extensions page (`api.settings`); what
+ * the extension remembers — the organization and sort picked in the chooser,
+ * which session was started from which issue, which folder each project's
+ * sessions were last started in — lives in prifly's database (`api.state`);
+ * the login token is prifly's vault (`auth.ts`). All of it moves with prifly's
+ * data. The only files this extension writes are the saved events under
+ * `issues/`, none in git. A prifly that lacks settings, state or the vault
+ * runs nothing (`supported`).
  */
 
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { type Clirc, findLogin, type Login, readClirc } from "./auth";
-import { type Attempt, parseStartSessions, type StartSessions } from "./auto-start";
+import { findLogin, type Login } from "./auth";
+import {
+  type Attempt,
+  DEFAULT_START_SESSIONS,
+  type StartSessions,
+  startSessionsFrom,
+} from "./auto-start";
 import { type Checkout, checkoutFor } from "./checkout";
+import { CHOICE_KEYS, type Choices, parseChoices, stateStore } from "./choices";
 import type { ExtensionApi, LaunchSpark } from "./prifly-api";
 import { obj, str } from "./read";
+import { ensureRegion, orgCreds } from "./region";
 import {
   type CodeMapping,
   type Creds,
@@ -26,10 +35,14 @@ import {
   organizationIssues,
   SentryError,
   type Sort,
+  whoami,
 } from "./sentry";
+import { settingsRaw, type Values } from "./settings";
+
+export { type Choice, type Choices, parseChoices } from "./choices";
 
 export type Config = {
-  /** The organization's slug: `morpheus-0r`. "" until chosen. */
+  /** The organization's slug: `your-org`. "" until chosen. */
   org: string;
   /** `https://sentry.io`, or a self-hosted Sentry's address. */
   baseUrl: string;
@@ -54,8 +67,8 @@ export type State = {
   /**
    * Issue id → when it was last linked to a session (ms). Kept for as long as any
    * session links the issue, so auto-start knows an issue was worked even after
-   * its session left prifly's list. A link without a time (a `state.json` from
-   * before this) counts as linked for good.
+   * its session left prifly's list. A link without a time (state from before
+   * times were kept) counts as linked for good.
    */
   linkedAt: Record<string, number>;
   /** Sentry project slug → the checkout its last session was started in. */
@@ -66,7 +79,10 @@ export type State = {
 
 export type World = {
   api: ExtensionApi;
+  /** What takes effect: the Extensions page's settings, with the chooser's choices on top (`effectiveConfig`). */
   config: Config;
+  /** What the reader picked in the chooser, kept in `api.state`'s `choices` document. */
+  choices: Choices;
   login: Login | null;
   state: State;
   /** What the chooser lists: the organization's issues, newest or busiest first. */
@@ -83,22 +99,19 @@ export type World = {
 
 const SORTS: readonly Sort[] = ["date", "new", "freq", "user"];
 
-/** `~/src/odi` → `/home/jimmy/src/odi`; anything else as it is. */
+/** `~/src/app` → that folder under the home folder; anything else as it is. */
 export function expandHome(path: string, home: string): string {
   if (path === "~") return home;
   return path.startsWith("~/") ? join(home, path.slice(2)) : path;
 }
 
 /**
- * config.json, read tolerantly: a missing or mistyped field takes its default,
- * and a project pinned to anything but a folder name is dropped.
+ * The settings (as `settingsRaw` gives them), read tolerantly: a missing or
+ * mistyped field takes its default, and a project pinned to anything but a
+ * folder name is dropped. `startSessions` is left at its defaults here;
+ * `effectiveConfig` sets it from the settings.
  */
-export function parseConfig(
-  raw: unknown,
-  env: Record<string, string | undefined>,
-  clirc: Clirc,
-  home: string,
-): Config {
+export function parseConfig(raw: unknown, home: string): Config {
   const config = obj(raw);
   const projects: Record<string, string> = {};
   for (const [slug, path] of Object.entries(obj(config["projects"]))) {
@@ -110,19 +123,14 @@ export function parseConfig(
   const sort = SORTS.find((name) => name === config["sort"]) ?? "date";
   const refresh = typeof config["refreshSeconds"] === "number" ? config["refreshSeconds"] : 120;
   return {
-    org: str(config["org"]) || env["SENTRY_ORG"] || clirc.org,
-    baseUrl: (
-      str(config["baseUrl"]) ||
-      env["SENTRY_URL"] ||
-      clirc.url ||
-      "https://sentry.io"
-    ).replace(/\/+$/, ""),
+    org: str(config["org"]),
+    baseUrl: (str(config["baseUrl"]) || "https://sentry.io").replace(/\/+$/, ""),
     projects,
     query: typeof config["query"] === "string" ? config["query"] : "is:unresolved",
     period: str(config["period"]) || "14d",
     sort,
     refreshSeconds: Math.max(30, refresh),
-    startSessions: parseStartSessions(config["startSessions"]),
+    startSessions: { ...DEFAULT_START_SESSIONS, levels: [...DEFAULT_START_SESSIONS.levels] },
   };
 }
 
@@ -150,7 +158,7 @@ function attempts(raw: unknown): Record<string, Attempt> {
 }
 
 /**
- * Each session's issue ids. A `state.json` from before a session could carry
+ * Each session's issue ids. State from before a session could carry
  * several issues holds one id as a string; it is read as a list of one.
  */
 function issueLists(raw: unknown): Record<string, string[]> {
@@ -205,7 +213,7 @@ function strings(raw: unknown): Record<string, string> {
   return kept;
 }
 
-/** The token and the server, when there is a login. */
+/** The token and the server, when there is a login. For calls that name no organization (who you are, the organization list). */
 export function creds(world: World): Creds | null {
   return world.login === null ? null : { baseUrl: world.config.baseUrl, token: world.login.token };
 }
@@ -239,13 +247,73 @@ async function mappingsOrNone(world: World, auth: Creds): Promise<CodeMapping[]>
   }
 }
 
+/** How long a start waits for Sentry to say whose token the vault holds. */
+const NAME_WAIT_MS = 5000;
+
+/**
+ * The vault entry holds only the token, so a login read from it has no name.
+ * Ask Sentry, the way logging in did. If that fails or is slow (offline,
+ * Sentry down) the login keeps an empty name, which shows the neutral label;
+ * the log says why, never the token.
+ */
+export async function withUser(
+  api: ExtensionApi,
+  config: { baseUrl: string },
+  login: Login | null,
+): Promise<Login | null> {
+  if (login === null || login.user !== "") return login;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    const user = await Promise.race([
+      whoami({ baseUrl: config.baseUrl, token: login.token }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error("timed out")), NAME_WAIT_MS);
+      }),
+    ]);
+    return { ...login, user };
+  } catch (caught) {
+    const message = caught instanceof Error ? caught.message : "failed";
+    api.log("user_name_failed", { message: message.replaceAll(login.token, "[token]") });
+    return login;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Whether this prifly can run the extension: it keeps the settings
+ * (`api.settings`), the state (`api.state`) and files a login token in the
+ * vault (`api.vault.file` and `forget`, the "vault-file" feature). Otherwise
+ * nothing runs but the row that says to update prifly (`setup.ts`).
+ */
+export function supported(api: ExtensionApi): boolean {
+  const features = api.features ?? [];
+  return (
+    features.includes("settings") &&
+    api.settings !== undefined &&
+    features.includes("state") &&
+    api.state !== undefined &&
+    features.includes("vault-file") &&
+    typeof api.vault?.file === "function" &&
+    typeof api.vault.forget === "function"
+  );
+}
+
+/**
+ * The world at start. On a prifly that is not `supported` it is empty and
+ * nothing is read: no state, no vault, no Sentry.
+ */
 export async function load(api: ExtensionApi): Promise<World> {
-  const clirc = await readClirc();
+  const store = supported(api) ? api.state : undefined;
+  const choices = store === undefined ? {} : parseChoices(await store.get("choices"));
+  const state = parseState(store === undefined ? undefined : await store.get(STATE_DOC));
+  const config = effectiveConfig(api.settings ?? {}, choices);
   return {
     api,
-    config: await readConfig(api.folder, clirc),
-    login: await findLogin(api.folder, Bun.env, clirc),
-    state: await readState(api.folder),
+    config,
+    choices,
+    login: store === undefined ? null : await withUser(api, config, await findLogin(api)),
+    state,
     issues: [],
     mappings: [],
     loadedAt: 0,
@@ -270,8 +338,10 @@ const STATS_BATCH = 25;
  * its chip should still say it is resolved.
  */
 export async function reload(world: World): Promise<void> {
-  const auth = creds(world);
-  if (auth === null || !ready(world)) return;
+  if (!ready(world)) return;
+  await ensureRegion(world);
+  const auth = orgCreds(world);
+  if (auth === null) return;
   const { org, query, period, sort } = world.config;
   const [issues, mappings] = await Promise.all([
     organizationIssues(auth, org, { query, period, sort, limit: LIMIT }),
@@ -357,24 +427,60 @@ export function sortIssues(issues: Issue[], sort: Sort): Issue[] {
   return [...issues].sort((a, b) => key(b) - key(a));
 }
 
-export async function readConfig(folder: string, clirc: Clirc): Promise<Config> {
-  const raw: unknown = await Bun.file(join(folder, "config.json"))
-    .json()
-    .catch(() => ({}));
-  return parseConfig(raw, Bun.env, clirc, homedir());
+/** A setting's text the way `settingsRaw` reads it. */
+function settingText(value: unknown): string {
+  return typeof value === "string" ? value.trim() : "";
 }
 
-export async function writeConfig(folder: string, config: Config): Promise<void> {
-  await Bun.write(join(folder, "config.json"), JSON.stringify(config, null, 2));
+/** What takes effect: the settings, with each chooser choice the reader has not since overruled. */
+export function effectiveConfig(values: Values, choices: Choices): Config {
+  const raw = settingsRaw(values);
+  for (const key of CHOICE_KEYS) {
+    const choice = choices[key];
+    if (choice !== undefined && choice.over === settingText(values[key])) raw[key] = choice.value;
+  }
+  const config = parseConfig(raw, homedir());
+  config.startSessions = startSessionsFrom(values);
+  return config;
 }
 
-export async function readState(folder: string): Promise<State> {
-  const raw: unknown = await Bun.file(join(folder, "state.json"))
-    .json()
-    .catch(() => ({}));
-  return parseState(raw);
+/** Reads the settings again, after the reader changed one. */
+export function applySettings(world: World): void {
+  world.config = effectiveConfig(world.api.settings ?? {}, world.choices);
 }
 
-export async function writeState(folder: string, state: State): Promise<void> {
-  await Bun.write(join(folder, "state.json"), JSON.stringify(state, null, 2));
+/**
+ * A choice made in the chooser (organization, sort): in force now and kept in
+ * prifly's database (the `choices` document), so it holds across restarts.
+ */
+export async function choose(world: World, change: { org?: string; sort?: Sort }): Promise<void> {
+  Object.assign(world.config, change);
+  const values = world.api.settings ?? {};
+  const made: Choices = {};
+  for (const key of CHOICE_KEYS) {
+    const value = change[key];
+    if (value !== undefined) made[key] = { value, over: settingText(values[key]) };
+  }
+  const kept = await stateStore(world.api).update<unknown>("choices", (current) => ({
+    ...parseChoices(current),
+    ...made,
+  }));
+  world.choices = parseChoices(kept);
+}
+
+/** The document the links and remembered folders live in. */
+const STATE_DOC = "state";
+
+/**
+ * Change the links and remembered folders, on the stored document inside
+ * `update`, so two writes at once cannot lose each other's change;
+ * `world.state` then takes the result.
+ */
+export async function changeState(world: World, mutate: (state: State) => void): Promise<void> {
+  const kept = await stateStore(world.api).update<unknown>(STATE_DOC, (current) => {
+    const next = parseState(current);
+    mutate(next);
+    return next;
+  });
+  Object.assign(world.state, parseState(kept));
 }

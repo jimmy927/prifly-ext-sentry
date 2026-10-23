@@ -7,9 +7,9 @@
  * remote is that repository. So a project is followed from its slug to its
  * repo, and the repo to its checkout, in this order:
  *
- * 1. `projects` in `config.json`, for a reader who wants to pin one by hand;
+ * 1. the **Project folders** setting, for a reader who wants to pin one by hand;
  * 2. the folder the reader last started one of this project's sessions in
- *    (`state.json`'s `folders`, learned when a session starts);
+ *    (the state's `folders`, learned when a session starts);
  * 3. the checkout behind a folder a prifly session on this machine runs in;
  * 4. a checkout of the repo directly in `~`, `~/src` or `~/code`;
  * 5. without a code mapping, a checkout named like the project there.
@@ -27,7 +27,7 @@ import type { CodeMapping } from "./sentry";
 export type Checkout = { repo: string; folder: string };
 
 export type Clues = {
-  /** Sentry project slug → folder, from `config.json`. */
+  /** Sentry project slug → folder, from the Project folders setting. */
   pinned: Record<string, string>;
   /** Sentry project slug → the checkout its last session was started in. */
   remembered: Record<string, string>;

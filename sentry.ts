@@ -158,9 +158,21 @@ export async function whoami(creds: Creds): Promise<string> {
 
 export type Named = { slug: string; name: string };
 
-export async function organizations(creds: Creds): Promise<Named[]> {
+/**
+ * An organization, and the data region that hosts it: `links.regionUrl` in
+ * Sentry's `/organizations/` answer (`https://de.sentry.io` for an EU
+ * organization, `https://us.sentry.io` for a US one). "" when Sentry gives
+ * none, as a self-hosted Sentry does not.
+ */
+export type Org = Named & { regionUrl: string };
+
+export async function organizations(creds: Creds): Promise<Org[]> {
   const orgs = arr(await call(creds, "GET", "/organizations/", { member: "1" }));
-  return orgs.map(obj).map((org) => ({ slug: str(org["slug"]), name: str(org["name"]) }));
+  return orgs.map(obj).map((org) => ({
+    slug: str(org["slug"]),
+    name: str(org["name"]),
+    regionUrl: str(obj(org["links"])["regionUrl"]).replace(/\/+$/, ""),
+  }));
 }
 
 export async function projects(creds: Creds, org: string): Promise<Named[]> {

@@ -10,19 +10,16 @@
  * again, one step further on.
  */
 
-import {
-  findLogin,
-  forgetLogin,
-  looksLikeToken,
-  readClirc,
-  tokenPageUrl,
-  writeLogin,
-} from "./auth";
+import { findLogin, looksLikeToken, removeLogin, saveLogin, tokenPageUrl } from "./auth";
 import type { Launch, LaunchChoice } from "./prifly-api";
+import { DEFAULT_BASE_URL, ensureRegion } from "./region";
 import { organizations, whoami } from "./sentry";
-import { creds, type World, writeConfig } from "./world";
+import { choose, creds, supported, type World } from "./world";
 
 const KEYS = {
+  update: "setup:update-prifly",
+  rejected: "setup:token-refused",
+  hint: "setup:self-hosted-hint",
   open: "setup:open-token-page",
   token: "setup:paste-token",
   org: "setup:org:",
@@ -35,8 +32,12 @@ export function isSetupKey(key: string): boolean {
   return key.startsWith("setup:");
 }
 
-/** The rows before any issue: the login, then the organization. Null once both are settled. */
+/**
+ * The rows before any issue: the login, then the organization. Null once both
+ * are settled. On a prifly that is not `supported` only the Update row.
+ */
 export async function setupChoices(world: World): Promise<LaunchChoice[] | null> {
+  if (!supported(world.api)) return [updateRow()];
   if (world.login === null) return loginRows(world);
   if (world.config.org === "") return await orgRows(world);
   return null;
@@ -76,7 +77,44 @@ function loginLine(world: World): string {
   const login = world.login;
   if (login === null) return "";
   const who = login.user === "" ? "" : ` as ${login.user}`;
-  return `Signed in${who} with the token from ${login.source}`;
+  return `Signed in${who} with the token in prifly's vault`;
+}
+
+/** This extension needs a prifly with settings, state and the vault: until then nothing runs. */
+function updateRow(): LaunchChoice {
+  return {
+    key: KEYS.update,
+    title: "Update prifly to use this extension",
+    group: "Setup",
+    detail:
+      "This extension needs a prifly with extension settings, state and the vault. Update prifly, then open this list again.",
+    tone: "warning",
+  };
+}
+
+/**
+ * The saved token is there but Sentry refuses it (revoked, expired): say so,
+ * and offer the way out — a new token pasted over it, or logging out.
+ */
+export function rejectedRows(world: World): LaunchChoice[] {
+  return [
+    {
+      key: KEYS.rejected,
+      title: "Sentry refused the saved token",
+      group: "Log in",
+      detail:
+        "It may have been revoked or have expired. Make a new token and paste it below, or log out to start over.",
+      tone: "warning",
+    },
+    ...loginRows(world),
+    {
+      key: KEYS.logout,
+      title: "Log out of Sentry",
+      group: "Log in",
+      detail: "Removes the refused token from prifly's vault.",
+      tone: "muted",
+    },
+  ];
 }
 
 /**
@@ -91,7 +129,21 @@ const TOKEN_PERMISSIONS =
   "Organization: Read. Member: No Access. Alerts: No Access.";
 
 function loginRows(world: World): LaunchChoice[] {
+  const hint: LaunchChoice[] =
+    world.config.baseUrl === DEFAULT_BASE_URL
+      ? [
+          {
+            key: KEYS.hint,
+            title: "Self-hosted Sentry?",
+            group: "Log in",
+            detail:
+              "Set Base URL (“Sentry address”) in prifly's Extensions dialog (Sentry issues) first.",
+            tone: "muted",
+          },
+        ]
+      : [];
   return [
+    ...hint,
     {
       key: KEYS.open,
       title: "1. Open Sentry's auth token page",
@@ -104,8 +156,7 @@ function loginRows(world: World): LaunchChoice[] {
       key: KEYS.token,
       title: "2. Paste the token Sentry shows you",
       group: "Log in",
-      detail:
-        "Sentry shows it once. It is checked there and then and kept on this machine only (auth.json, readable by you alone).",
+      detail: `Sentry shows it once. It is checked there and then and kept in prifly's vault (you confirm on a card).`,
       tone: "info",
       input: { title: "Your Sentry auth token", placeholder: "sntryu_…" },
     },
@@ -128,6 +179,13 @@ async function orgRows(world: World): Promise<LaunchChoice[]> {
 
 /** Carry out one of those rows. Null when the key is not one of them. */
 export async function runSetup(world: World, key: string, input: string): Promise<Launch | null> {
+  if (key === KEYS.update) {
+    return {
+      prompt: "",
+      message: "Update prifly to use this extension, then open this list again.",
+    };
+  }
+  if (key === KEYS.hint || key === KEYS.rejected) return { prompt: "", message: "" };
   if (key === KEYS.open) return await openTokenPage(world);
   if (key === KEYS.token) return await saveToken(world, input);
   if (key.startsWith(KEYS.org)) return await chooseOrg(world, key.slice(KEYS.org.length));
@@ -171,50 +229,53 @@ async function saveToken(world: World, input: string): Promise<Launch> {
   // Asked of Sentry before it is kept: a token that does not work should fail
   // here, where the reader is looking, not quietly on the next refresh.
   const user = await whoami({ baseUrl: world.config.baseUrl, token });
-  await writeLogin(world.api.folder, token, user);
-  world.login = { token, user, source: "auth.json" };
+  const kept = await saveLogin(world.api, token, user, world.config.baseUrl);
+  if (!kept.saved) {
+    world.api.log("login_not_saved", { user });
+    return { prompt: "", message: kept.reason };
+  }
+  world.login = { token, user };
   world.api.log("logged_in", { user });
   return { prompt: "", message: `Logged in as ${user}.` };
 }
 
 async function chooseOrg(world: World, slug: string): Promise<Launch> {
-  world.config.org = slug;
-  await writeConfig(world.api.folder, world.config);
+  await choose(world, { org: slug });
+  // Which data region hosts it (EU organizations are on de.sentry.io): kept with the choice.
+  await ensureRegion(world);
   world.api.log("org_chosen", { org: slug });
   return { prompt: "", message: `Showing every project in ${slug}.` };
 }
 
-/** Projects belong to an organization, so any folder pinned to one goes with it. */
+/** Back to the organization list. (Folders pinned in the Project folders setting stay: the Extensions page owns them.) */
 async function switchOrg(world: World): Promise<Launch> {
-  world.config.org = "";
-  world.config.projects = {};
+  await choose(world, { org: "" });
   world.issues = [];
   world.mappings = [];
   world.loadedAt = 0;
-  await writeConfig(world.api.folder, world.config);
   return { prompt: "", message: "" };
 }
 
 async function toggleSort(world: World): Promise<Launch> {
-  world.config.sort = world.config.sort === "freq" ? "date" : "freq";
-  await writeConfig(world.api.folder, world.config);
+  await choose(world, { sort: world.config.sort === "freq" ? "date" : "freq" });
   world.issues = [];
   world.loadedAt = 0;
   return { prompt: "", message: `Sorted by ${SORT_NAMES[world.config.sort]}.` };
 }
 
 async function logOut(world: World): Promise<Launch> {
-  await forgetLogin(world.api.folder);
-  world.login = await findLogin(world.api.folder, Bun.env, await readClirc());
+  const remains = await removeLogin(world.api);
+  world.login = remains ? await findLogin(world.api) : null;
   world.issues = [];
   world.loadedAt = 0;
   world.linked = new Map();
-  world.api.log("logged_out", { still: world.login?.source ?? "none" });
+  world.api.log("logged_out", { still: world.login !== null });
   if (world.login !== null) {
     return {
       prompt: "",
-      message: `The token pasted here is gone, but ${world.login.source} still has one — remove it there to log out fully.`,
+      message:
+        "The vault entry “sentry” is one you made yourself, so prifly could not remove it — remove it in prifly's vault to log out fully.",
     };
   }
-  return { prompt: "", message: "Logged out. The token on this machine is gone." };
+  return { prompt: "", message: "Logged out. The token is gone from prifly's vault." };
 }

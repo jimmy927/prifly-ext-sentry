@@ -240,12 +240,43 @@ export type StartAnswer = { started: true; sessionId: string } | { started: fals
 /** A session the host knows, for an extension to match its things against. */
 export type ExtensionSession = { id: string; title: string; cwd: string; state: string };
 
+/** What `api.vault.file` asks of the reader; the token never comes back. */
+export type VaultFileRequest = {
+  token: string;
+  label?: string | undefined;
+  host?: string | undefined;
+  why: string;
+};
+
+/** How the reader answered the vault card, or why none was shown. */
+export type VaultFileResult =
+  | { outcome: "accepted"; level: 1 | 2 | 4 }
+  | { outcome: "declined" }
+  | { outcome: "timed out" }
+  | { outcome: "refused"; message: string };
+
+/**
+ * The vault entries this extension's manifest names under `vault`.
+ * `read` is on any prifly with a vault; `file` and `forget` only where
+ * `features` includes "vault-file".
+ */
+export type ExtensionVaultApi = {
+  /** An `api-token` entry's token, or null (no entry, not level 1, not in the manifest). */
+  read(name: string): Promise<string | null>;
+  /** Asks the reader to file `token` as the entry `name`; resolves once they answer. */
+  file?(name: string, request: VaultFileRequest): Promise<VaultFileResult>;
+  /** Log out: removes an entry this extension filed; true when it did. */
+  forget?(name: string): Promise<boolean>;
+};
+
 export type ExtensionApi = {
   /**
    * What this prifly accepts beyond the first version, by name — "start-session"
    * among them where `start` exists. Absent on a prifly that predates the list.
    */
   features?: readonly string[];
+  /** The vault entries the manifest's `vault` list names. Absent on a prifly without one. */
+  vault?: ExtensionVaultApi;
   /**
    * Open `url` in the reader's own browser (on Windows, the Windows one, also
    * when prifly's host runs in WSL). Only http and https are opened. The
@@ -291,6 +322,12 @@ export type ExtensionApi = {
   settings?: Readonly<Record<string, SettingValue>>;
   /** Called with every value after the reader changes one. One handler; a second call replaces it. */
   onSettings?(handler: (values: Readonly<Record<string, SettingValue>>) => void): void;
+  /**
+   * What the extension keeps for itself, in prifly's database: JSON
+   * documents and append-only logs, moving with prifly's data. Only where
+   * `features` includes "state".
+   */
+  state?: ExtensionStateApi;
   /** The sessions on this machine the host knows now. */
   sessions(): ExtensionSession[];
   /** A line in the host's log, under `ext.<id>.<event>`. */
@@ -347,4 +384,39 @@ export type ExtensionModule = {
     actionId: string,
     picked?: ActionPicked,
   ) => string | undefined | Promise<string | undefined>;
+};
+
+/** `api.state`, as prifly's `state.ts` declares it. Absent on an older prifly: check `features` for "state". */
+export type ExtensionStateApi = {
+  /** The document `name`, or undefined when there is none. `T` is what the caller says it is, unchecked. */
+  get<T = unknown>(name: string): Promise<NoInfer<T> | undefined>;
+  /** Replace the document `name` with `value`, in one write. */
+  set(name: string, value: unknown): Promise<void>;
+  /**
+   * Read the document, give it to `fn` (undefined when there is none), and
+   * store what `fn` returns. Writes to one name run one at a time, so two
+   * updates never lose each other's change. Never await a write to the same
+   * name inside `fn`.
+   */
+  update<T>(name: string, fn: (current: T | undefined) => T | Promise<T>): Promise<T>;
+  /** Remove the document `name`; true when there was one. */
+  delete(name: string): Promise<boolean>;
+  /** The names of this extension's documents, sorted. */
+  list(): Promise<string[]>;
+  /**
+   * Bring state in from somewhere else once: when the document `name`
+   * exists it is returned and `make` is not called; otherwise `make`'s value
+   * is stored and returned, and undefined from `make` stores nothing.
+   */
+  importOnce<T>(
+    name: string,
+    make: () => T | undefined | Promise<T | undefined>,
+  ): Promise<T | undefined>;
+  /** Add `entry` to the end of the log `name`; resolves to its `seq`. */
+  append(name: string, entry: unknown): Promise<number>;
+  /** The log `name`'s entries, oldest first. */
+  read<T = unknown>(
+    name: string,
+    options?: { after?: number; since?: number; limit?: number },
+  ): Promise<{ seq: number; at: number; entry: NoInfer<T> }[]>;
 };

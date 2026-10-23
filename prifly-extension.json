@@ -4,8 +4,60 @@
   "description": "Your Sentry issues in prifly: log in with your own Sentry token, start a session from an issue with its stack trace, breadcrumbs and the whole latest event on disk, and keep the issue on that session's banner.",
   "version": "0.1.0",
   "main": "index.ts",
+  "vault": ["sentry"],
   "prompt": "prompt.md",
   "settings": [
+    {
+      "id": "org",
+      "label": "Sentry organization",
+      "description": "The organization's slug, like your-org. Left empty, the chooser offers your organizations.",
+      "type": "string",
+      "default": ""
+    },
+    {
+      "id": "baseUrl",
+      "label": "Sentry address",
+      "description": "Only for a self-hosted Sentry; sentry.io otherwise.",
+      "type": "string",
+      "default": "https://sentry.io"
+    },
+    {
+      "id": "projectFolders",
+      "label": "Project folders",
+      "description": "Optional: the folder a project's sessions always start in, as slug=folder pairs separated by ;, like odi=C:\\Users\\you\\src\\odi;web=~/src/web. Usually empty: the folder is found by itself.",
+      "type": "string",
+      "default": ""
+    },
+    {
+      "id": "query",
+      "label": "Search",
+      "description": "Sentry search syntax for the list, like is:unresolved level:error.",
+      "type": "string",
+      "default": "is:unresolved"
+    },
+    {
+      "id": "period",
+      "label": "Seen within",
+      "description": "How recently an issue must have been seen to be listed: 24h, 14d, 90d.",
+      "type": "string",
+      "default": "14d"
+    },
+    {
+      "id": "sort",
+      "label": "Sort by",
+      "description": "date (last seen), new (first seen), freq (events) or user (users affected).",
+      "type": "string",
+      "default": "date"
+    },
+    {
+      "id": "refreshSeconds",
+      "label": "Refresh every (seconds)",
+      "description": "How often the list is read from Sentry again.",
+      "type": "number",
+      "default": 120,
+      "min": 30,
+      "max": 3600
+    },
     {
       "id": "startSessions",
       "label": "Start sessions by itself",
