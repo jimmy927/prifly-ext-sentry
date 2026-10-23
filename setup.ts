@@ -18,7 +18,6 @@ import {
   tokenPageUrl,
   writeLogin,
 } from "./auth";
-import { openBrowser } from "./open-browser";
 import type { Launch, LaunchChoice } from "./prifly-api";
 import { organizations, whoami } from "./sentry";
 import { creds, type World, writeConfig } from "./world";
@@ -147,7 +146,17 @@ export function tokenPageMessage(opened: boolean, url: string): string {
 
 async function openTokenPage(world: World): Promise<Launch> {
   const url = tokenPageUrl(world.config.baseUrl);
-  const opened = await openBrowser(url);
+  // prifly's own opener, which knows the host (Windows, WSL, macOS). Without
+  // it the URL is shown in the dialog to be copied.
+  const { api } = world;
+  let opened = false;
+  if ((api.features ?? []).includes("open-url") && api.openUrl !== undefined) {
+    try {
+      opened = await api.openUrl(url);
+    } catch {
+      // A page that would not open is not worth unwinding a step for.
+    }
+  }
   world.api.log("token_page", { opened });
   return { prompt: "", message: tokenPageMessage(opened, url) };
 }
