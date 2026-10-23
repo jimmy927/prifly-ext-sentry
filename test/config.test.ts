@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { join } from "node:path";
 import { looksLikeToken, parseClirc } from "../auth";
 import { alreadyStarted, matches } from "../index";
 import { columnOf, issueChip, issueFace, statusActions } from "../issue-face";
@@ -39,7 +40,7 @@ describe("parseConfig", () => {
       "/home/me",
     );
     expect(config.org).toBe("acme");
-    expect(config.projects).toEqual({ odi: "/home/me/odi", web: "/srv/web" });
+    expect(config.projects).toEqual({ odi: join("/home/me", "odi"), web: "/srv/web" });
   });
 
   test("the organization and server fall back to the environment, then ~/.sentryclirc", () => {

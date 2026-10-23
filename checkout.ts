@@ -20,7 +20,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { homedir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, normalize } from "node:path";
 import type { CodeMapping } from "./sentry";
 
 /** Where a project's sessions start, and how that was found; `folder` "" for nowhere. */
@@ -105,8 +105,9 @@ export function mainCheckout(folder: string): string {
     if (kind === "dir") return at;
     if (kind === "file") {
       const pointer = /^gitdir:\s*(.+?)\s*$/m.exec(readText(git))?.[1] ?? "";
-      const marker = pointer.lastIndexOf("/.git/worktrees/");
-      return marker < 0 ? "" : pointer.slice(0, marker);
+      // git writes "/" even on Windows, but a hand-made pointer may use "\".
+      const marker = /[\\/]\.git[\\/]worktrees[\\/]/.exec(pointer);
+      return marker === null ? "" : normalize(pointer.slice(0, marker.index));
     }
     const up = dirname(at);
     if (up === at) return "";
