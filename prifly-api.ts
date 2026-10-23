@@ -247,6 +247,13 @@ export type ExtensionApi = {
    */
   features?: readonly string[];
   /**
+   * Open `url` in the reader's own browser (on Windows, the Windows one, also
+   * when prifly's host runs in WSL). Only http and https are opened. The
+   * answer says whether a browser opened. Only where `features` includes
+   * "open-url".
+   */
+  openUrl?(url: string): Promise<boolean>;
+  /**
    * Replace everything this extension shows. `bySession` is keyed by a
    * session id or any unique start of one (a label has room for 8 characters);
    * items for an id no session has, and `unclaimed`, go to the status bar.

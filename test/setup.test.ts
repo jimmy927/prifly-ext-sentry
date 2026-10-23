@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import type { ExtensionApi } from "../prifly-api";
 import { SentryError } from "../sentry";
-import { setupChoices, tokenPageMessage } from "../setup";
+import { runSetup, setupChoices, tokenPageMessage } from "../setup";
 import type { World } from "../world";
 
-function fakeWorld(): World {
+function fakeWorld(extra: Partial<ExtensionApi> = {}): World {
   const api: ExtensionApi = {
     show: () => undefined,
     onAction: () => undefined,
@@ -12,6 +12,7 @@ function fakeWorld(): World {
     log: () => undefined,
     folder: "/tmp/fake-sentry-ext",
     paths: [],
+    ...extra,
   };
   return {
     api,
@@ -112,5 +113,53 @@ describe("SentryError names the permission a 403 is missing", () => {
     expect(new SentryError("GET", "/organizations/acme/issues/1/", 500, "boom").message).toBe(
       "Sentry /organizations/acme/issues/1/: 500 boom",
     );
+  });
+});
+
+describe("the token page row opens the page through prifly's openUrl", () => {
+  const URL = "https://sentry.io/settings/account/api/auth-tokens/";
+
+  function opener(answer: boolean | Error, features: string[] | null = ["open-url"]) {
+    const urls: string[] = [];
+    const world = fakeWorld({
+      ...(features === null ? {} : { features }),
+      openUrl: async (url: string) => {
+        urls.push(url);
+        if (answer instanceof Error) throw answer;
+        return answer;
+      },
+    });
+    return { urls, world };
+  }
+
+  test("a browser that opened: the reader is told what to do next, not shown the URL", async () => {
+    const { urls, world } = opener(true);
+    const launch = await runSetup(world, "setup:open-token-page", "");
+    expect(urls).toEqual([URL]);
+    expect(launch?.message).toBe(tokenPageMessage(true, URL));
+    expect(launch?.message).not.toContain(URL);
+  });
+
+  test("a browser that did not open: the URL is shown to copy", async () => {
+    const { urls, world } = opener(false);
+    const launch = await runSetup(world, "setup:open-token-page", "");
+    expect(urls).toEqual([URL]);
+    expect(launch?.message).toBe(tokenPageMessage(false, URL));
+    expect(launch?.message).toContain(URL);
+  });
+
+  test("an openUrl that throws counts as not opened", async () => {
+    const { world } = opener(new Error("boom"));
+    const launch = await runSetup(world, "setup:open-token-page", "");
+    expect(launch?.message).toBe(tokenPageMessage(false, URL));
+  });
+
+  test("without the open-url feature openUrl is never called and the URL is shown", async () => {
+    for (const features of [[], null]) {
+      const { urls, world } = opener(true, features);
+      const launch = await runSetup(world, "setup:open-token-page", "");
+      expect(urls).toEqual([]);
+      expect(launch?.message).toBe(tokenPageMessage(false, URL));
+    }
   });
 });
