@@ -109,12 +109,22 @@ export function issuesToStart(
         issue.status !== "resolved" &&
         issue.status !== "ignored" &&
         levels.has(issue.level) &&
+        !isReleaseSmokeTest(issue) &&
         lastSeen(issue) >= oldest &&
         !worked.has(issue.id) &&
         recent[issue.id] === undefined,
     )
     .sort((a, b) => firstSeen(a) - firstSeen(b))
     .slice(0, room);
+}
+
+/**
+ * Prifly's own release smoke test raises one deliberate error per release tag,
+ * titled `prifly release smoke test: …` (Sentry may put the error type in
+ * front); it is never a bug, so it never starts a session.
+ */
+export function isReleaseSmokeTest(issue: Issue): boolean {
+  return /^(?:[\w.]+: )?prifly release smoke test/.test(issue.title);
 }
 
 /** When the issue was last seen; NaN when unreadable, which no cut-off admits. */

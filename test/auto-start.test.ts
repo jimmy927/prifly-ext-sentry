@@ -100,6 +100,17 @@ describe("issuesToStart", () => {
     ]);
   });
 
+  test("never prifly's own release smoke test, which is not a bug", () => {
+    const smoke = (id: string, title: string): Issue => ({ ...issue(id), title });
+    const issues = [
+      smoke("bare", "prifly release smoke test: smoke-41555183895-1-linux-x64"),
+      smoke("typed", "Error: prifly release smoke test: smoke-41555183895-1-linux-x64"),
+      smoke("real", "TypeError: cannot read properties of undefined"),
+      smoke("mention", "Error: the prifly release smoke test job failed to upload"),
+    ];
+    expect(ids(issuesToStart(issues, none, {}, on, NOW))).toEqual(["real", "mention"]);
+  });
+
   test("not one a session already works on", () => {
     expect(ids(issuesToStart([issue("a"), issue("b")], new Set(["a"]), {}, on, NOW))).toEqual([
       "b",
