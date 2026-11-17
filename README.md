@@ -12,6 +12,10 @@ JSON beside the prompt. The issue then rides along on that session's banner:
 click it to open it in Sentry, or use its menu to resolve or archive it when
 the work is done.
 
+![The From a Sentry issue board in prifly: unresolved issues in four columns, New, Escalating, Regressed and Ongoing, each card with its culprit, an event chart and user count](docs/screenshot.png)
+
+*The issue board, with invented data: your unresolved issues in Sentry's own triage columns.*
+
 It is the Sentry twin of
 [prifly-ext-trello](https://github.com/jimmy927/prifly-ext-trello) and is built
 the same way.
