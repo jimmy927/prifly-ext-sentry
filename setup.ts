@@ -10,7 +10,15 @@
  * again, one step further on.
  */
 
-import { findLogin, looksLikeToken, removeLogin, saveLogin, tokenPageUrl } from "./auth";
+import {
+  findLogin,
+  looksLikeToken,
+  OLD_ENTRY_HINT,
+  removeLogin,
+  saveLogin,
+  takeVaultHint,
+  tokenPageUrl,
+} from "./auth";
 import type { Launch, LaunchChoice } from "./prifly-api";
 import { DEFAULT_BASE_URL, ensureRegion } from "./region";
 import { organizations, whoami } from "./sentry";
@@ -77,17 +85,18 @@ function loginLine(world: World): string {
   const login = world.login;
   if (login === null) return "";
   const who = login.user === "" ? "" : ` as ${login.user}`;
-  return `Signed in${who} with the token in prifly's vault`;
+  const hint = takeVaultHint(world.api);
+  return `Signed in${who}${hint === "" ? "" : `. ${hint}`}`;
 }
 
-/** This extension needs a prifly with settings, state and the vault: until then nothing runs. */
+/** This extension needs a prifly with settings, state and secrets: until then nothing runs. */
 function updateRow(): LaunchChoice {
   return {
     key: KEYS.update,
     title: "Update prifly to use this extension",
     group: "Setup",
     detail:
-      "This extension needs a prifly with extension settings, state and the vault. Update prifly, then open this list again.",
+      "This extension needs a prifly with extension settings, state and secrets. Update prifly, then open this list again.",
     tone: "warning",
   };
 }
@@ -111,7 +120,7 @@ export function rejectedRows(world: World): LaunchChoice[] {
       key: KEYS.logout,
       title: "Log out of Sentry",
       group: "Log in",
-      detail: "Removes the refused token from prifly's vault.",
+      detail: "Deletes the refused token.",
       tone: "muted",
     },
   ];
@@ -156,7 +165,7 @@ function loginRows(world: World): LaunchChoice[] {
       key: KEYS.token,
       title: "2. Paste the token Sentry shows you",
       group: "Log in",
-      detail: `Sentry shows it once. It is checked there and then and kept in prifly's vault (you confirm on a card).`,
+      detail: `Sentry shows it once. It is checked there and then and kept by this extension, in prifly's sealed secrets.`,
       tone: "info",
       input: { title: "Your Sentry auth token", placeholder: "sntryu_…" },
     },
@@ -229,7 +238,7 @@ async function saveToken(world: World, input: string): Promise<Launch> {
   // Asked of Sentry before it is kept: a token that does not work should fail
   // here, where the reader is looking, not quietly on the next refresh.
   const user = await whoami({ baseUrl: world.config.baseUrl, token });
-  const kept = await saveLogin(world.api, token, user, world.config.baseUrl);
+  const kept = await saveLogin(world.api, token);
   if (!kept.saved) {
     world.api.log("login_not_saved", { user });
     return { prompt: "", message: kept.reason };
@@ -264,18 +273,17 @@ async function toggleSort(world: World): Promise<Launch> {
 }
 
 async function logOut(world: World): Promise<Launch> {
-  const remains = await removeLogin(world.api);
-  world.login = remains ? await findLogin(world.api) : null;
+  const oldEntryRemains = await removeLogin(world.api);
+  world.login = await findLogin(world.api);
   world.issues = [];
   world.loadedAt = 0;
   world.linked = new Map();
   world.api.log("logged_out", { still: world.login !== null });
   if (world.login !== null) {
-    return {
-      prompt: "",
-      message:
-        "The vault entry “sentry” is one you made yourself, so prifly could not remove it — remove it in prifly's vault to log out fully.",
-    };
+    return { prompt: "", message: "Could not remove the token. Try logging out again." };
   }
-  return { prompt: "", message: "Logged out. The token is gone from prifly's vault." };
+  return {
+    prompt: "",
+    message: oldEntryRemains ? `Logged out. ${OLD_ENTRY_HINT}` : "Logged out. The token is gone.",
+  };
 }

@@ -49,7 +49,7 @@ afterEach(() => {
 
 async function setup(options: { token?: boolean; org?: string } = {}) {
   const fake: FakePrifly = fakePrifly("/x", { settings: { org: options.org ?? "acme" } });
-  if (options.token !== false) fake.entries.set("sentry", TOKEN);
+  if (options.token !== false) fake.secrets.set("token", TOKEN);
   await fake.database.set("choices", { regions: { acme: REGION } });
   const world = await load(fake.api);
   requests.length = 0;

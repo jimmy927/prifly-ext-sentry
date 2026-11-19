@@ -8,4 +8,4 @@ extension itself has no runtime dependencies, since prifly's host imports `index
 After the install, `bun test`, `bun run typecheck` and `bun run check` work.
 
 Relies on outside the worktree: `bun` on the PATH. Nothing else: the tests use a fake prifly
-(`test/fake-prifly.ts`), and the Sentry login lives in prifly's vault, not in a file.
+(`test/fake-prifly.ts`), and the Sentry login lives in the extension's secrets, not in a file.

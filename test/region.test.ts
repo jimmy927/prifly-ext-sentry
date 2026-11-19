@@ -48,8 +48,9 @@ function world(org: string, baseUrl: string, docs = new Map<string, unknown>()):
     log: () => undefined,
     folder: "/tmp/fake-sentry-ext",
     paths: [],
-    features: ["settings", "state", "vault-file"],
+    features: ["settings", "state", "secrets"],
     settings: {},
+    secrets: { get: async () => null, set: async () => undefined, keys: async () => [] },
     vault: {
       read: async () => null,
       file: async () => ({ outcome: "declined" }),

@@ -49,7 +49,7 @@ const rowsOf = async (): Promise<LaunchChoice[]> => (await choices("issue", ""))
 const titles = (rows: LaunchChoice[]) => rows.map((row) => row.title);
 
 describe("an older prifly", () => {
-  const missing: Needed[] = ["settings", "state", "vault-file"];
+  const missing: Needed[] = ["settings", "state", "secrets"];
 
   for (const lacks of missing) {
     test(`without ${lacks}: only the Update row, and nothing else runs`, async () => {
@@ -58,6 +58,7 @@ describe("an older prifly", () => {
         without: [lacks],
         settings: { ...SETTING_DEFAULTS, org: "acme" },
       });
+      fake.secrets.set("token", TOKEN);
       fake.entries.set("sentry", TOKEN);
       await start(fake);
       const rows = await rowsOf();
@@ -73,7 +74,7 @@ describe("an older prifly", () => {
 
   test("the log-in rows are not offered either", async () => {
     sentry([TOKEN]);
-    const fake = fakePrifly("/x", { without: ["vault-file"] });
+    const fake = fakePrifly("/x", { without: ["secrets"] });
     await start(fake);
     const rows = await rowsOf();
     expect(rows.some((row) => row.key === "setup:paste-token")).toBe(false);
@@ -88,13 +89,13 @@ describe("logged out", () => {
     const rows = await rowsOf();
     expect(rows.map((row) => row.key)).toContain("setup:open-token-page");
     expect(rows.map((row) => row.key)).toContain("setup:paste-token");
-    expect(rows.find((row) => row.key === "setup:paste-token")?.detail).toContain("prifly's vault");
+    expect(rows.find((row) => row.key === "setup:paste-token")?.detail).not.toContain("vault");
     expect(seen).toEqual([]);
   });
 });
 
 describe("logging in", () => {
-  test("the pasted token is filed in the vault entry sentry, then the issue list loads", async () => {
+  test("the pasted token is kept in secrets, never filed in the vault, then the issue list loads", async () => {
     const seen = sentry([TOKEN]);
     const folder = mkdtempSync(join(tmpdir(), "sentry-states-"));
     const fake = fakePrifly(folder);
@@ -102,10 +103,9 @@ describe("logging in", () => {
 
     const done = await launch("issue", "setup:paste-token", TOKEN);
     expect(done.message).toBe("Logged in as Ada Lovelace.");
-    expect(fake.filed).toHaveLength(1);
-    expect(fake.filed[0]?.name).toBe("sentry");
-    expect(fake.filed[0]?.request.token).toBe(TOKEN);
-    expect(fake.entries.get("sentry")).toBe(TOKEN);
+    expect(fake.filed).toEqual([]);
+    expect(fake.entries.size).toBe(0);
+    expect(fake.secrets.get("token")).toBe(TOKEN);
 
     // Logged in, no organization yet: the organizations are offered.
     const orgs = await rowsOf();
@@ -117,18 +117,25 @@ describe("logging in", () => {
     expect(board.items[0]?.title).toContain(rawIssue.title);
     expect(seen.every((call) => call.auth === `Bearer ${TOKEN}`)).toBe(true);
     expect(fake.logs.join("\n")).not.toContain(TOKEN);
-    // The token is in the vault only: no auth.json, no marker, nothing written to the folder.
+    // The token is in secrets only: no auth.json, no marker, nothing written to the folder.
     expect(readdirSync(folder)).toEqual([]);
   });
 
-  test("a declined card saves nothing and the login rows stay", async () => {
+  test("a prifly that refuses the write saves nothing and nothing shows the token", async () => {
     sentry([TOKEN]);
-    const fake = fakePrifly("/x", { answer: "declined" });
+    const fake = fakePrifly("/x");
+    fake.api.secrets = {
+      get: async () => null,
+      set: async (key, value) => {
+        if (key === "token") throw new Error(`disk full for ${value}`);
+      },
+      keys: async () => [],
+    };
     await start(fake);
     const done = await launch("issue", "setup:paste-token", TOKEN);
-    expect(done.message).toContain("declined");
+    expect(done.message).toContain("not saved");
     expect(done.message).not.toContain(TOKEN);
-    expect(fake.entries.size).toBe(0);
+    expect(fake.logs.join("\n")).not.toContain(TOKEN);
     expect(titles(await rowsOf())).toContain("2. Paste the token Sentry shows you");
   });
 
@@ -138,7 +145,7 @@ describe("logging in", () => {
     await start(fake);
     await expect(launch("issue", "setup:paste-token", TOKEN)).rejects.toThrow("401");
     expect(fake.filed).toEqual([]);
-    expect(fake.entries.size).toBe(0);
+    expect(fake.secrets.has("token")).toBe(false);
   });
 
   test("something that is not a token is refused before Sentry is asked", async () => {
@@ -156,7 +163,7 @@ describe("a saved token Sentry no longer accepts", () => {
   test("the list says so and offers a new token or a log out, instead of an error", async () => {
     sentry([NEW]);
     const fake = fakePrifly("/x", { settings: { ...SETTING_DEFAULTS, org: "acme" } });
-    fake.entries.set("sentry", TOKEN);
+    fake.secrets.set("token", TOKEN);
     await start(fake);
     const rows = await rowsOf();
     expect(rows[0]?.title).toBe("Sentry refused the saved token");
@@ -168,37 +175,51 @@ describe("a saved token Sentry no longer accepts", () => {
   test("pasting a new token replaces it and the list loads", async () => {
     sentry([NEW]);
     const fake = fakePrifly("/x", { settings: { ...SETTING_DEFAULTS, org: "acme" } });
-    fake.entries.set("sentry", TOKEN);
+    fake.secrets.set("token", TOKEN);
     await start(fake);
     expect((await rowsOf())[0]?.title).toBe("Sentry refused the saved token");
     await launch("issue", "setup:paste-token", NEW);
-    expect(fake.entries.get("sentry")).toBe(NEW);
+    expect(fake.secrets.get("token")).toBe(NEW);
     const board = (await choices("issue", "")) as LaunchBoard;
     expect(board.items.length).toBeGreaterThan(0);
   });
 });
 
 describe("logging out", () => {
-  test("the vault entry is forgotten and the login rows come back", async () => {
+  test("the secret is deleted and the login rows come back, with no word about a vault", async () => {
     sentry([TOKEN]);
     const fake = fakePrifly("/x");
     await start(fake);
     await launch("issue", "setup:paste-token", TOKEN);
     await launch("issue", "setup:org:acme", "");
     const done = await launch("issue", "setup:log-out", "");
-    expect(done.message).toContain("Logged out");
-    expect(fake.forgotten).toEqual(["sentry"]);
-    expect(fake.entries.size).toBe(0);
+    expect(done.message).toBe("Logged out. The token is gone.");
+    expect(fake.secrets.has("token")).toBe(false);
+    expect(fake.forgotten).toEqual([]);
     expect(titles(await rowsOf())).toContain("2. Paste the token Sentry shows you");
   });
 
-  test("an entry the reader made themselves stays, and the message says so", async () => {
+  test("an old vault entry is moved at start and forgotten; log out leaves nothing", async () => {
+    sentry([TOKEN]);
+    const fake = fakePrifly("/x");
+    fake.entries.set("sentry", TOKEN);
+    await start(fake);
+    expect(fake.secrets.get("token")).toBe(TOKEN);
+    expect(fake.entries.size).toBe(0);
+    const done = await launch("issue", "setup:log-out", "");
+    expect(done.message).toBe("Logged out. The token is gone.");
+    expect(fake.secrets.has("token")).toBe(false);
+  });
+
+  test("an old entry the reader made themselves stays: the token is gone and the hint is given", async () => {
     sentry([TOKEN]);
     const fake = fakePrifly("/x", { ownEntry: false });
     fake.entries.set("sentry", TOKEN);
     await start(fake);
     const done = await launch("issue", "setup:log-out", "");
-    expect(done.message).toContain("one you made yourself");
+    expect(done.message).toContain("Vault dialog");
+    expect(done.message).not.toContain(TOKEN);
+    expect(fake.secrets.has("token")).toBe(false);
     expect(fake.entries.get("sentry")).toBe(TOKEN);
   });
 });

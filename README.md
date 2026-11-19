@@ -22,16 +22,21 @@ the same way.
 
 ## Install
 
-Needs a prifly with extension **settings**, **state** and the **vault** (its
-"vault-file" feature). When one of the three is missing the list shows a single
+Needs a prifly with extension **settings**, **state** and **secrets** (its
+"secrets" feature). When one of the three is missing the list shows a single
 row, "Update prifly to use this extension", and nothing else runs: no refresh,
 no Sentry calls.
+
+**Coming from a version that kept the token in prifly's vault?** Nothing to do:
+at the first start the token is moved into the extension's own secrets and the
+old entry is removed. If that entry is one you made yourself, prifly leaves it,
+and the extension says once that you can remove it in the Vault dialog.
 
 **Upgrading from an earlier version?** The token used to be kept in `auth.json`
 in this folder (or read from `SENTRY_AUTH_TOKEN` / `~/.sentryclirc`), and the
 choices in `state.json` / `config.json`. None of these is read any more, so you
 log in once again: open **From a Sentry issue…** and paste a token (below); it
-goes straight into the vault. Delete the old `auth.json` and `state.json`
+goes straight into the extension's secrets. Delete the old `auth.json` and `state.json`
 yourself. Your settings are on the Extensions page and are not affected; links
 from sessions to issues made before `api.state` are not carried over.
 
@@ -84,8 +89,8 @@ Open **From a Sentry issue…** and follow the rows it shows:
    403, and the extension's error (and the `sentry.py` skill's) names which
    permission to raise.
 2. **Paste the token Sentry shows you** — one paste, once. It is checked
-   against Sentry there and then and kept in **prifly's vault** (the entry
-   `sentry`; prifly shows you a card to confirm it, and the token travels with
+   against Sentry there and then and kept in the extension's own **secrets**
+   (sealed by prifly, readable by this extension only, and moving with
    prifly's data). It is never written to a file.
 3. **Choose an organization** — and that is all. Every project in it is
    listed, including ones made in Sentry later; there are no projects to map.
@@ -113,18 +118,16 @@ you pick the folder") and prifly's New session form asks for the folder. The
 checkout you pick there is remembered for that project's next session. Give a
 project a code mapping in Sentry and none of this is needed.
 
-The token is read from one place only: the vault entry `sentry`. Neither
+The token is read from one place only: the extension's secrets. Neither
 `SENTRY_AUTH_TOKEN` nor `~/.sentryclirc` (`sentry-cli`'s) is looked at, and
 neither is the organization in them: choose it in the chooser or on the
 Extensions page. Sessions are told never to ask for a token.
 
 The rows kept beside the issues change any of it later: **Sort by events / last
-seen**, **Switch organization…**, **Log out of Sentry** (which removes the
-vault entry; an entry you made yourself in the vault is yours to remove).
+seen**, **Switch organization…**, **Log out of Sentry** (which deletes the
+token).
 
-If the vault card is declined, left unanswered or refused, nothing is saved and
-the row says so; the token is filed at level 1, the only one the extension can
-read. If Sentry later refuses the saved token (revoked, expired), the list shows
+If prifly cannot keep the token, nothing is saved and the row says so. If Sentry later refuses the saved token (revoked, expired), the list shows
 "Sentry refused the saved token" with the login rows again: paste a new one, or
 log out. The token is never written to prifly's log or shown in a message.
 
@@ -266,6 +269,11 @@ SENTRY_AUTH_TOKEN=sntryu_… SENTRY_LIVE_ORG=your-org SENTRY_LIVE_PROJECT=your-p
 `prifly-api.ts` is a copy of prifly's extension contract
 (`apps/desktop-host/src/extensions/api.ts`), kept here so the repository
 type-checks on its own.
+
+The manifest (`prifly-extension.json`) still lists `"vault": ["sentry"]`. That is
+for the migration only (reading and forgetting the entry an earlier version
+filed); the manifest is plain JSON and cannot carry a comment. Nothing new is
+ever filed in the vault.
 
 ## License and contributing
 

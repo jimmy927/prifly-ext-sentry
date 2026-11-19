@@ -229,8 +229,19 @@ describe("the state document", () => {
   });
 });
 
-describe("a prifly without settings, state or the vault-file feature", () => {
-  const missing: Needed[] = ["settings", "state", "vault-file"];
+describe("a prifly without settings, state or the secrets feature", () => {
+  const missing: Needed[] = ["settings", "state", "secrets"];
+
+  test("the vault is optional: a prifly with secrets and no vault is supported", () => {
+    expect(supported(fakePrifly("/x", { noVault: true }).api)).toBe(true);
+  });
+
+  test("the vault-file feature does not stand in for secrets", () => {
+    const api = fakePrifly("/x").api;
+    const { secrets: _secrets, ...noSecrets } = api;
+    expect(supported({ ...noSecrets, features: ["settings", "state", "vault-file"] })).toBe(false);
+    expect(supported({ ...api, features: ["settings", "state", "vault-file"] })).toBe(false);
+  });
 
   test("all three present is supported, any one missing is not", () => {
     expect(supported(fakePrifly("/x").api)).toBe(true);
@@ -258,6 +269,7 @@ describe("a prifly without settings, state or the vault-file feature", () => {
       for (const lacks of missing) {
         const folder = newFolder();
         const fake = fakePrifly(folder, { without: [lacks] });
+        fake.secrets.set("token", "sntryu_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         fake.entries.set("sentry", "sntryu_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
         const world = await load(fake.api);
         expect(world.login).toBeNull();

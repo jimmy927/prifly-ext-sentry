@@ -390,7 +390,7 @@ export type ExtensionSecretsApi = {
 export type ExtensionApi = {
   /**
    * What this prifly accepts beyond the first version, by name — "start-session"
-   * among them where `start` exists. Absent on a prifly that predates the list.
+   * among them where `start` exists, and "secrets" where `api.secrets` does. Absent on a prifly that predates the list.
    */
   features?: readonly string[];
   /** The vault entries the manifest's `vault` list names. Absent on a prifly without one. */

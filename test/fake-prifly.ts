@@ -1,5 +1,6 @@
 import type {
   ExtensionApi,
+  ExtensionSecretsApi,
   ExtensionSession,
   SettingValue,
   VaultFileRequest,
@@ -8,27 +9,28 @@ import type {
 import { type FakeState, fakeState } from "./fake-state";
 
 /** The three things this extension needs of a prifly: `supported` wants all of them. */
-export type Needed = "settings" | "state" | "vault-file";
+export type Needed = "settings" | "state" | "secrets";
 
 export type FakePrifly = {
   api: ExtensionApi;
   /** prifly's database for the extension. */
   database: FakeState;
-  /** The vault's entries, by name. */
+  /** The extension's own secrets, by key. */
+  secrets: Map<string, string>;
+  /** The vault's entries, by name: only an old login is ever in there. */
   entries: Map<string, string>;
+  /** Every `api.vault.file` call: the extension must make none. */
   filed: { name: string; request: VaultFileRequest }[];
   forgotten: string[];
   logs: string[];
-  /** Set during a test: the level the reader files at (anything but 1 makes `read` answer null) and a card held open. */
-  control: { level: 1 | 2 | 4; gate: Promise<void> | null };
 };
 
 export type FakeOptions = {
   /** Features (and the api that goes with each) this prifly lacks. */
   without?: Needed[];
-  /** What the reader answers on the vault's card. */
-  answer?: VaultFileResult["outcome"];
-  /** False for an entry the reader made themselves, which `forget` cannot remove. */
+  /** A prifly with no vault at all. */
+  noVault?: boolean;
+  /** False for a vault entry the reader made themselves, which `forget` cannot remove. */
   ownEntry?: boolean;
   settings?: Readonly<Record<string, SettingValue>>;
   /** Extra features this prifly offers, such as "start-session". */
@@ -36,33 +38,35 @@ export type FakeOptions = {
   sessions?: ExtensionSession[];
   /** A database that outlives this api, as prifly's does across a restart. */
   database?: FakeState;
+  /** Secrets that outlive this api, as prifly's do across a restart. */
+  secrets?: Map<string, string>;
 };
 
-/** A prifly's api for one extension, in memory: settings, `api.state` and the vault. */
+/** A prifly's api for one extension, in memory: settings, `api.state`, `api.secrets` and the vault. */
 export function fakePrifly(folder: string, options: FakeOptions = {}): FakePrifly {
   const lacks = new Set<Needed>(options.without ?? []);
   const database = options.database ?? fakeState();
+  const secrets = options.secrets ?? new Map<string, string>();
   const entries = new Map<string, string>();
   const filed: FakePrifly["filed"] = [];
   const forgotten: string[] = [];
   const logs: string[] = [];
-  const control: FakePrifly["control"] = { level: 1, gate: null };
-  const answer = options.answer ?? "accepted";
-  const read = async (name: string) => (control.level === 1 ? (entries.get(name) ?? null) : null);
-  const vault = lacks.has("vault-file")
-    ? { read }
+  const secretsApi: ExtensionSecretsApi = {
+    get: async (key) => secrets.get(key) ?? null,
+    set: async (key, value) => {
+      if (value === null) secrets.delete(key);
+      else secrets.set(key, value);
+    },
+    keys: async (prefix = "") => [...secrets.keys()].filter((key) => key.startsWith(prefix)).sort(),
+  };
+  const vault = options.noVault
+    ? undefined
     : {
-        read,
+        read: async (name: string) => entries.get(name) ?? null,
         file: async (name: string, request: VaultFileRequest): Promise<VaultFileResult> => {
           filed.push({ name, request });
-          await control.gate;
-          if (answer === "accepted") {
-            entries.set(name, request.token);
-            return { outcome: "accepted", level: control.level };
-          }
-          return answer === "refused"
-            ? { outcome: "refused", message: "not listed" }
-            : { outcome: answer };
+          entries.set(name, request.token);
+          return { outcome: "accepted", level: 1 };
         },
         forget: async (name: string) => {
           forgotten.push(name);
@@ -74,7 +78,8 @@ export function fakePrifly(folder: string, options: FakeOptions = {}): FakePrifl
     folder,
     paths: [],
     features: [
-      ...(["settings", "state", "vault-file"] as const).filter((feature) => !lacks.has(feature)),
+      ...(["settings", "state", "secrets"] as const).filter((feature) => !lacks.has(feature)),
+      ...(options.noVault ? [] : ["vault-file"]),
       ...(options.features ?? []),
     ],
     log: (event: string, fields?: Record<string, unknown>) =>
@@ -82,9 +87,10 @@ export function fakePrifly(folder: string, options: FakeOptions = {}): FakePrifl
     show: () => undefined,
     onAction: () => undefined,
     sessions: () => options.sessions ?? [],
-    vault,
+    ...(vault === undefined ? {} : { vault }),
+    ...(lacks.has("secrets") ? {} : { secrets: secretsApi }),
     ...(lacks.has("settings") ? {} : { settings: options.settings ?? {} }),
     ...(lacks.has("state") ? {} : { state: database }),
   } as unknown as ExtensionApi;
-  return { api, database, entries, filed, forgotten, logs, control };
+  return { api, database, secrets, entries, filed, forgotten, logs };
 }

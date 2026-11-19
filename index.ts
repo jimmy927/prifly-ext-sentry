@@ -14,8 +14,8 @@
  * There is nothing to configure by hand (the few plain settings are in prifly's
  * Extensions page; `settings.ts`). The first time you open the chooser
  * it offers the login, then your organizations. See `setup.ts` for that,
- * `auth.ts` for the token (prifly's vault), and `world.ts` for what is kept
- * in prifly's database. A prifly without settings, state or the vault shows
+ * `auth.ts` for the token (the extension's secrets), and `world.ts` for what is
+ * kept in prifly's database. A prifly without settings, state or secrets shows
  * one "Update prifly" row and runs nothing else.
  */
 
@@ -73,7 +73,7 @@ export async function activate(api: ExtensionApi): Promise<() => void> {
   world = await load(api);
   // The tools read the world each call, so a login or setting changed later is seen; absent on an older prifly.
   api.tools?.register(sentryTools(() => world));
-  // Settings, state or the vault missing: the chooser says to update prifly
+  // Settings, state or secrets missing: the chooser says to update prifly
   // (`setupChoices`), and nothing else runs — no timer, no Sentry calls.
   if (!supported(api)) {
     return () => {

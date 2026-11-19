@@ -5,9 +5,9 @@
  * the extension remembers — the organization and sort picked in the chooser,
  * which session was started from which issue, which folder each project's
  * sessions were last started in — lives in prifly's database (`api.state`);
- * the login token is prifly's vault (`auth.ts`). All of it moves with prifly's
- * data. The only files this extension writes are the saved events under
- * `issues/`, none in git. A prifly that lacks settings, state or the vault
+ * the login token is in the extension's own secrets (`auth.ts`). All of it moves
+ * with prifly's data. The only files this extension writes are the saved events
+ * under `issues/`, none in git. A prifly that lacks settings, state or secrets
  * runs nothing (`supported`).
  */
 
@@ -247,11 +247,11 @@ async function mappingsOrNone(world: World, auth: Creds): Promise<CodeMapping[]>
   }
 }
 
-/** How long a start waits for Sentry to say whose token the vault holds. */
+/** How long a start waits for Sentry to say whose token is kept. */
 const NAME_WAIT_MS = 5000;
 
 /**
- * The vault entry holds only the token, so a login read from it has no name.
+ * Secrets hold only the token, so a login read from them has no name.
  * Ask Sentry, the way logging in did. If that fails or is slow (offline,
  * Sentry down) the login keeps an empty name, which shows the neutral label;
  * the log says why, never the token.
@@ -282,8 +282,9 @@ export async function withUser(
 
 /**
  * Whether this prifly can run the extension: it keeps the settings
- * (`api.settings`), the state (`api.state`) and files a login token in the
- * vault (`api.vault.file` and `forget`, the "vault-file" feature). Otherwise
+ * (`api.settings`), the state (`api.state`) and keeps the
+ * login token in its own secrets (`api.secrets`, the "secrets" feature). The
+ * vault is not needed: it is read only to move an old token out of it. Otherwise
  * nothing runs but the row that says to update prifly (`setup.ts`).
  */
 export function supported(api: ExtensionApi): boolean {
@@ -293,9 +294,8 @@ export function supported(api: ExtensionApi): boolean {
     api.settings !== undefined &&
     features.includes("state") &&
     api.state !== undefined &&
-    features.includes("vault-file") &&
-    typeof api.vault?.file === "function" &&
-    typeof api.vault.forget === "function"
+    features.includes("secrets") &&
+    api.secrets !== undefined
   );
 }
 
