@@ -9,8 +9,8 @@ function prompt(event: unknown, files: string[] = []): string {
   return issuePrompt({ issue, event, folder: "/ext/issues/SHOP-1A2", files, now: NOW });
 }
 
-describe("the sentry skill's flags", () => {
-  test("named when the extension knows the organization and address", () => {
+describe("the pointer to the sentry tools", () => {
+  test("names the tools and, when known, the organization", () => {
     const text = issuePrompt({
       issue,
       event: null,
@@ -18,12 +18,12 @@ describe("the sentry skill's flags", () => {
       files: [],
       now: NOW,
       org: "morpheus-0r",
-      baseUrl: "https://sentry.example.com",
     });
-    expect(text).toContain("`--org morpheus-0r --base-url https://sentry.example.com`");
-    expect(prompt(null)).not.toContain("--org");
-    const odd = issuePrompt({ issue, event: null, folder: "/f", files: [], now: NOW, org: "a b" });
-    expect(odd).toContain("`--org 'a b'`");
+    expect(text).toContain("`sentry_search`");
+    expect(text).toContain("The organization is `morpheus-0r`");
+    expect(text).not.toContain("--org");
+    expect(prompt(null)).not.toContain("The organization is");
+    expect(prompt(null)).not.toContain("vault_run");
   });
 });
 

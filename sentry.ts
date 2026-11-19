@@ -279,6 +279,43 @@ export function latestEvent(creds: Creds, org: string, id: string): Promise<unkn
   return call(creds, "GET", `/organizations/${enc(org)}/issues/${enc(id)}/events/latest/`);
 }
 
+/**
+ * An issue named the way a person does, as its numeric id: a numeric id, an
+ * issue URL (`…/issues/1234567890/`), or a short id (`PROJ-1A2`, which Sentry
+ * resolves within the organization).
+ */
+export async function resolveIssueId(creds: Creds, org: string, ref: string): Promise<string> {
+  const text = ref.trim();
+  const inUrl = /\/issues\/(\d+)/.exec(text);
+  if (inUrl?.[1] !== undefined) return inUrl[1];
+  if (/^\d+$/.test(text)) return text;
+  const hit = obj(
+    await call(creds, "GET", `/organizations/${enc(org)}/shortids/${enc(text.toUpperCase())}/`),
+  );
+  const id = str(hit["groupId"]) || str(obj(hit["group"])["id"]);
+  if (id === "") throw new Error(`Sentry has no issue ${text} in ${org}.`);
+  return id;
+}
+
+/** An issue's events, newest first, as Sentry returns them. */
+export async function issueEvents(
+  creds: Creds,
+  org: string,
+  id: string,
+  limit: number,
+): Promise<unknown[]> {
+  return arr(
+    await call(creds, "GET", `/organizations/${enc(org)}/issues/${enc(id)}/events/`, {
+      per_page: String(limit),
+    }),
+  );
+}
+
+/** One event of an issue: `latest`, `oldest`, `recommended` or an event id; whole, as Sentry returns it. */
+export function issueEvent(creds: Creds, org: string, id: string, which: string): Promise<unknown> {
+  return call(creds, "GET", `/organizations/${enc(org)}/issues/${enc(id)}/events/${enc(which)}/`);
+}
+
 export type StatusChange = "resolved" | "unresolved" | "ignored";
 
 /**

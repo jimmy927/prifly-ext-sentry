@@ -17,8 +17,8 @@ export const DEFAULT_BASE_URL = "https://sentry.io";
  * the default sentry.io, the organization's data region once it is known,
  * else sentry.io itself.
  */
-export function apiBase(world: World): string {
-  const { baseUrl, org } = world.config;
+export function apiBase(world: World, org: string = world.config.org): string {
+  const { baseUrl } = world.config;
   if (baseUrl !== DEFAULT_BASE_URL) return baseUrl;
   return world.choices.regions?.[org] ?? baseUrl;
 }
@@ -38,16 +38,20 @@ const looked = new WeakMap<World, Set<string>>();
  * nothing for a self-hosted Base URL. Never throws: without a region the
  * calls go to sentry.io, which is right for US organizations.
  */
-export async function ensureRegion(world: World): Promise<void> {
-  const { baseUrl, org } = world.config;
-  if (world.login === null || org === "" || baseUrl !== DEFAULT_BASE_URL) return;
+export async function ensureRegion(
+  world: World,
+  org: string = world.config.org,
+  token: string | undefined = world.login?.token,
+): Promise<void> {
+  const { baseUrl } = world.config;
+  if (token === undefined || org === "" || baseUrl !== DEFAULT_BASE_URL) return;
   if (world.choices.regions?.[org] !== undefined) return;
   const tried = looked.get(world) ?? new Set<string>();
   looked.set(world, tried);
   if (tried.has(org)) return;
   tried.add(org);
   try {
-    const found = (await organizations({ baseUrl, token: world.login.token })).find(
+    const found = (await organizations({ baseUrl, token })).find(
       (candidate) => candidate.slug === org,
     );
     if (found !== undefined && found.regionUrl !== "") {

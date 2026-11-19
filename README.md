@@ -162,8 +162,8 @@ stored. Nothing needs setting. A **Sentry address** other than `sentry.io` (a
 self-hosted Sentry) always wins over the region, and links to issues open at the
 address Sentry itself gives for them.
 
-The `sentry` skill uses the same region: a session started from an issue passes
-it as `--base-url`, and the script on its own reads the stored one from prifly's
+The `sentry_*` tools use the same region. The `sentry` skill's script, run in a
+terminal, reads the stored one from prifly's
 database (`extension_state`, document `choices`). It finds that database at
 `$PRIFLY_DB`, else in prifly's data folder: `$XDG_DATA_HOME/prifly` or
 `~/.local/share/prifly` (Linux, WSL), `~/Library/Application Support/prifly`
@@ -228,13 +228,18 @@ is not started: the New session form would have asked for the folder.
   issue, and its menu resolves it, archives it until it escalates, or reopens
   it. It keeps showing the issue's current status after it leaves the
   unresolved list.
-- **A Claude Code skill** — `skills/sentry`: search issues, read an issue and
-  its latest event, list its events, save an event's JSON, and resolve /
-  archive / reopen when asked. In prifly it uses the same login: sessions run
-  it through `vault_run` with the entry `sentry`, which sets `SENTRY_TOKEN`.
-  Standard-library Python. The repository is also a Claude Code plugin and its
-  own marketplace, so terminal sessions can have it too; there, set
-  `SENTRY_AUTH_TOKEN` to your Sentry token:
+- **Sentry tools for every session** — `sentry_search`, `sentry_issue`,
+  `sentry_events` and `sentry_event` (a prifly session sees them as
+  `mcp__prifly__sentry_…`): search issues, read an issue with its latest event
+  summarised, list an issue's events, read one event, and save an event's whole
+  JSON to the session's scratchpad. The extension makes the calls with your
+  login, so a session never holds the token. They only read; resolving and
+  archiving stay on the issue chip.
+- **A Claude Code skill** — `skills/sentry`, for a terminal outside prifly:
+  the same reads from the command line, plus resolve / archive / reopen when
+  asked. Standard-library Python. The repository is also a Claude Code plugin
+  and its own marketplace, so terminal sessions can have it; there, set
+  `SENTRY_AUTH_TOKEN` to your Sentry token (inside prifly use the tools above):
 
       claude plugin marketplace add jimmy927/prifly-ext-sentry
       claude plugin install sentry@prifly-ext-sentry

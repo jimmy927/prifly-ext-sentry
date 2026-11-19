@@ -35,9 +35,8 @@ export type PromptParts = {
   folder: string;
   files: string[];
   now: number;
-  /** The organization and Sentry address this extension is set to, for the sentry skill's flags. */
+  /** The organization this extension is set to, named for the sentry_* tools. */
   org?: string;
-  baseUrl?: string;
 };
 
 /** The issue read whole, as Markdown: the chooser's reading pane and the prompt share it. */
@@ -90,22 +89,13 @@ export function issuePrompt(parts: PromptParts): string {
     .join("\n\n");
 }
 
-/** What the sentry skill needs to reach the same organization and server as this extension. */
+/** Which tools read more of this issue's Sentry, and which organization they use. */
 function skillFlags(parts: PromptParts): string {
-  const flags = [
-    parts.org === undefined || parts.org === "" ? "" : `--org ${shellWord(parts.org)}`,
-    parts.baseUrl === undefined || parts.baseUrl === ""
+  const org =
+    parts.org === undefined || parts.org === ""
       ? ""
-      : `--base-url ${shellWord(parts.baseUrl)}`,
-  ].filter((flag) => flag !== "");
-  return flags.length === 0
-    ? ""
-    : `When you use the sentry skill's script for this issue, pass \`${flags.join(" ")}\` before the subcommand.`;
-}
-
-/** A value as one shell word: plain ones as they are, anything else in single quotes. */
-function shellWord(value: string): string {
-  return /^[\w.:/@-]+$/.test(value) ? value : `'${value.replaceAll("'", "'\\''")}'`;
+      : ` The organization is \`${parts.org}\` (the tools use it unless you pass \`org\`).`;
+  return `To read other issues or events of this Sentry, call the \`sentry_search\`, \`sentry_issue\`, \`sentry_events\` and \`sentry_event\` tools.${org}`;
 }
 
 function section(heading: string, body: string): string {

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -92,7 +92,7 @@ describe("the sentry skill's organization", () => {
     expect(err).toContain("SENTRY_TOKEN is not set");
   });
 
-  test("the token is SENTRY_AUTH_TOKEN, or SENTRY_TOKEN as vault_run sets it for the entry sentry", () => {
+  test("the token is SENTRY_AUTH_TOKEN, or SENTRY_TOKEN", () => {
     const row = JSON.stringify({ org: "o" });
     expect(JSON.parse(settings({ SENTRY_AUTH_TOKEN: "auth" }, row).out)[1]).toBe("auth");
     expect(JSON.parse(settings({ SENTRY_AUTH_TOKEN: "", SENTRY_TOKEN: "vault" }, row).out)[1]).toBe(
@@ -103,11 +103,22 @@ describe("the sentry skill's organization", () => {
     ).toBe("auth");
   });
 
-  test("without any token it points at vault_run", () => {
+  test("without any token it says to set SENTRY_AUTH_TOKEN, and does not mention vault_run", () => {
     const row = JSON.stringify({ org: "o" });
     const err = settings({ SENTRY_AUTH_TOKEN: "" }, row).err;
-    expect(err).toContain('vault_run tool with entry "sentry"');
     expect(err).toContain("SENTRY_TOKEN is not set");
+    expect(err).toContain("Set SENTRY_AUTH_TOKEN");
+    expect(err).not.toContain("vault_run");
+  });
+
+  test("the skill's text sends prifly sessions to the tools, not vault_run", () => {
+    const skill = readFileSync(join(skillDir, "SKILL.md"), "utf8");
+    const python = readFileSync(join(skillDir, "sentry.py"), "utf8");
+    for (const text of [skill, python]) {
+      expect(text).not.toContain("vault_run");
+      expect(text).toContain("sentry_issue");
+    }
+    expect(skill).toContain("Inside a prifly session do NOT use this");
   });
 
   test("an empty value, a missing row or database falls through", () => {

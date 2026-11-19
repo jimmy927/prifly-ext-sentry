@@ -3,12 +3,12 @@
 Sentry CLI for Claude Code sessions: search issues, read an issue and an
 event, list an issue's events, and resolve / archive / reopen an issue.
 
-The token comes only from the environment: SENTRY_TOKEN or SENTRY_AUTH_TOKEN.
-The reader's login lives in prifly's vault as the entry "sentry" (the token they
-pasted into prifly's "From a Sentry issue…"): run this script through the
-vault_run tool with entry "sentry", which hands the token over as SENTRY_TOKEN
-(the name the vault gives an api-token entry called "sentry"). Outside prifly
-set SENTRY_AUTH_TOKEN yourself.
+For a terminal outside prifly. Inside a prifly session the Sentry extension
+serves the same reads as the tools sentry_search, sentry_issue, sentry_events
+and sentry_event, with the reader's own login; use those there, not this script.
+
+The token comes only from the environment: set SENTRY_AUTH_TOKEN (or
+SENTRY_TOKEN) to your Sentry token.
 
 The organization and address: --org / --base-url, SENTRY_ORG / SENTRY_URL, then
 the Sentry extension's settings in prifly's database (read-only). Standard
@@ -103,9 +103,8 @@ def settings(org_flag: str | None, base_flag: str | None = None) -> tuple[str, s
     token = os.environ.get("SENTRY_AUTH_TOKEN") or os.environ.get("SENTRY_TOKEN")
     if not token:
         sys.exit(
-            "SENTRY_TOKEN is not set. Inside prifly, run this script through the vault_run "
-            "tool with entry \"sentry\" (log in first from \"From a Sentry issue…\"). Outside "
-            "prifly, set SENTRY_AUTH_TOKEN (or SENTRY_TOKEN) to your Sentry token."
+            "SENTRY_TOKEN is not set. Set SENTRY_AUTH_TOKEN (or SENTRY_TOKEN) to your Sentry "
+            "token. (Inside a prifly session use the sentry_* tools instead of this script.)"
         )
     base = base_flag or os.environ.get("SENTRY_URL") or prifly_setting("baseUrl")
     org = org_flag or os.environ.get("SENTRY_ORG") or prifly_setting("org")

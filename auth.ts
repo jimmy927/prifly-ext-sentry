@@ -37,12 +37,17 @@ export function looksLikeToken(text: string): boolean {
 
 /** The login in the vault; null when there is none (or the vault cannot be read). */
 export async function findLogin(api: LoginApi): Promise<Login | null> {
-  const filed = await readVault(api);
+  const filed = await sentryToken(api);
   return filed === null ? null : { token: filed, user: "" };
 }
 
-/** The vault entry's token; null with no entry, above level 1, or when reading fails. */
-async function readVault(api: LoginApi): Promise<string | null> {
+/**
+ * THE one place the reader's Sentry token is read from: everything that calls
+ * Sentry (the list, the session tools) gets it here, so where the token is
+ * kept changes in this function only. Read each time it is needed, never kept.
+ * Null with no login, above level 1, or when reading fails.
+ */
+export async function sentryToken(api: LoginApi): Promise<string | null> {
   try {
     const token = await api.vault?.read(VAULT_ENTRY);
     return typeof token === "string" && token !== "" ? token : null;
@@ -95,7 +100,7 @@ export async function saveLogin(
       await forgetQuietly(api);
       return { saved: false, reason: "You logged out while the vault card was open." };
     }
-    if ((await readVault(api)) === null) {
+    if ((await sentryToken(api)) === null) {
       // Filed at level 2 or 4, which an extension cannot read: it would be logged out at the next start.
       await forgetQuietly(api);
       return {
@@ -127,7 +132,7 @@ export async function saveLogin(
 export async function removeLogin(api: LoginApi): Promise<boolean> {
   generation += 1;
   await forgetQuietly(api);
-  return (await readVault(api)) !== null;
+  return (await sentryToken(api)) !== null;
 }
 
 /** Counts logins and logouts, so a card answered after one knows it is out of date. */

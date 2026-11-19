@@ -40,7 +40,7 @@ import type {
   StartAnswer,
 } from "./prifly-api";
 import { clip } from "./read";
-import { apiBase, orgCreds } from "./region";
+import { orgCreds } from "./region";
 import {
   type Creds,
   type Issue,
@@ -53,6 +53,7 @@ import {
 } from "./sentry";
 import { isSetupKey, rejectedRows, runSetup, setupChoices, setupTail } from "./setup";
 import { shortDate } from "./time";
+import { sentryTools } from "./tools";
 import {
   applySettings,
   changeState,
@@ -70,6 +71,8 @@ let world: World | null = null;
 
 export async function activate(api: ExtensionApi): Promise<() => void> {
   world = await load(api);
+  // The tools read the world each call, so a login or setting changed later is seen; absent on an older prifly.
+  api.tools?.register(sentryTools(() => world));
   // Settings, state or the vault missing: the chooser says to update prifly
   // (`setupChoices`), and nothing else runs — no timer, no Sentry calls.
   if (!supported(api)) {
@@ -433,7 +436,6 @@ async function issueLaunch(at: World, key: string): Promise<Launch> {
       files,
       now: Date.now(),
       org: at.config.org,
-      baseUrl: apiBase(at),
     }),
     name: clip(issue.title, 60),
   };

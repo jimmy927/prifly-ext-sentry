@@ -269,6 +269,124 @@ export type ExtensionVaultApi = {
   forget?(name: string): Promise<boolean>;
 };
 
+/** An amount the reader confirms with the row (a rental's budget). */
+export type PickAmount = {
+  /** "Budget for this rental" */
+  label: string;
+  /** "$" */
+  prefix: string;
+  /** The session's suggestion; the reader may change it. */
+  value: number;
+  /** One line under the field: how the suggestion was made, what it means. */
+  hint: string;
+  /**
+   * Recompute one column from the amount as the reader types: each row's
+   * `column` cell becomes `amount / Number(row[rateColumn])` with `unit`,
+   * and its header "Hours in <prefix><amount>".
+   */
+  perRow?: { column: string; rateColumn: string; unit: string };
+  /**
+   * A soft limit on the amount. Only where `api.features` includes
+   * "pick-amount-limit": an older prifly refuses the unknown field.
+   */
+  limit?: {
+    /** The largest amount within the limit. */
+    max: number;
+    /** A line always shown under the hint (the credit breakdown). */
+    text: string;
+    /** The warning shown once the typed amount is above `max`. */
+    over: string;
+    /** The label of the checkbox the reader must tick to go past `max`. */
+    ack: string;
+  };
+};
+
+/** What an extension tool asks the reader: prifly's pick card, optionally with an amount. */
+export type ExtensionPick = {
+  title: string;
+  columns: string[];
+  rows: string[][];
+  /** One URL or null per cell, shaped like `rows`. Only where `features` includes "pick-links". */
+  links?: (string | null)[][];
+  /** Hover text per cell, shaped like `rows`. Only where `features` includes "pick-cells". */
+  titles?: (string | null)[][];
+  /** How each cell is drawn, shaped like `rows`. Only where `features` includes "pick-cells". */
+  cellKinds?: ("flag" | "link-icon" | null)[][];
+  /** The button's word, default "Choose". */
+  action?: string;
+  amount?: PickAmount;
+};
+
+/** The reader's answer: the row and, when the pick had one, the amount they confirmed. Null: none of these. */
+export type ExtensionPickAnswer = { row: number; amount: number | null } | null;
+
+export type ExtensionToolContext = {
+  /** The full id of the session that called the tool. */
+  session: string;
+  /** Show a pick card in that session and wait for the reader. */
+  pick(request: ExtensionPick): Promise<ExtensionPickAnswer>;
+  /** Aborted when the session or the call goes away. */
+  signal: AbortSignal;
+  /**
+   * The calling session's scratchpad folder, made if it is missing: where a
+   * tool that saves files for a session puts them. Reading it throws when
+   * prifly has no transcript to find the folder from, so a tool that never
+   * reads it is never affected. Where `features` includes "tool-scratchpad".
+   */
+  readonly scratchpad: string;
+};
+
+export type ExtensionTool = {
+  /** `^[a-z][a-z0-9_]{0,47}$`; the session sees it as `mcp__prifly__<name>`. */
+  name: string;
+  description: string;
+  /** A JSON Schema object for the arguments. */
+  inputSchema: Record<string, unknown>;
+  /** The text the tool returns. A throw is returned as an MCP tool error with its message. */
+  call(args: Record<string, unknown>, ctx: ExtensionToolContext): Promise<string>;
+};
+
+/** `api.tools`. Absent on an older prifly: call it as `api.tools?.register(...)`. */
+export type ExtensionToolsApi = {
+  /**
+   * Replace every tool this extension serves. A name another extension or
+   * prifly owns, or an `inputSchema` that is not `type: "object"`, is refused
+   * and logged. A session reads the tool list when it connects: one already
+   * running sees a change only after it reconnects.
+   */
+  register(tools: ExtensionTool[]): void;
+  /**
+   * Call a tool another extension serves and get its text. Only a tool the
+   * manifest's `reads` lists is called. Never throws: failures come back as
+   * `ok: false` with why. Only where `features` includes "read-tools".
+   */
+  read?(
+    name: string,
+    args: Record<string, unknown>,
+  ): Promise<{ ok: true; text: string } | { ok: false; error: string }>;
+};
+
+/**
+ * `api.secrets`: a small store for what an extension must keep and nobody else
+ * may read. Only where `features` includes "secrets"; absent on an older
+ * prifly: call it as `api.secrets?.get(...)`.
+ *
+ * Values are text, kept per extension: another extension's keys are neither
+ * readable nor listed. Each is sealed with the vault's device key before it
+ * reaches the database. A key is at most 200 characters and a value at most
+ * 1 MB, and `set` rejects anything beyond. Writes are batched and committed
+ * together within a tick; `get` and `keys` see them at once. After the
+ * extension stops, `get` answers null, `keys` an empty list and `set` rejects.
+ */
+export type ExtensionSecretsApi = {
+  /** The value under `key`, or null when there is none. */
+  get(key: string): Promise<string | null>;
+  /** Stores `value` under `key`; null deletes the key. Resolves once it is committed. */
+  set(key: string, value: string | null): Promise<void>;
+  /** Every key, or only those starting with `prefix`, sorted. */
+  keys(prefix?: string): Promise<string[]>;
+};
+
 export type ExtensionApi = {
   /**
    * What this prifly accepts beyond the first version, by name — "start-session"
@@ -277,6 +395,13 @@ export type ExtensionApi = {
   features?: readonly string[];
   /** The vault entries the manifest's `vault` list names. Absent on a prifly without one. */
   vault?: ExtensionVaultApi;
+  /** A sealed key-value store of this extension's own, for credentials. Where `features` includes "secrets". */
+  secrets?: ExtensionSecretsApi;
+  /**
+   * MCP tools this extension serves to every session, as `mcp__prifly__<name>`.
+   * Only while it is running.
+   */
+  tools?: ExtensionToolsApi;
   /**
    * Open `url` in the reader's own browser (on Windows, the Windows one, also
    * when prifly's host runs in WSL). Only http and https are opened. The
