@@ -127,7 +127,8 @@ The rows kept beside the issues change any of it later: **Sort by events / last
 seen**, **Switch organization…**, **Log out of Sentry** (which deletes the
 token).
 
-If prifly cannot keep the token, nothing is saved and the row says so. If Sentry later refuses the saved token (revoked, expired), the list shows
+If prifly cannot keep the token, nothing is saved and the row says so. If
+Sentry later refuses the saved token (revoked, expired), the list shows
 "Sentry refused the saved token" with the login rows again: paste a new one, or
 log out. The token is never written to prifly's log or shown in a message.
 

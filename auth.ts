@@ -100,32 +100,45 @@ export function migrateVaultToken(api: LoginApi): Promise<void> {
 async function migrate(api: LoginApi): Promise<void> {
   const secrets = api.secrets;
   if (secrets === undefined) return;
-  let moving = "";
+  const moving = { token: "" };
   try {
     if ((await secrets.get(MIGRATED_KEY)) !== null) return;
-    if ((await secrets.get(SECRET_KEY)) === null) {
-      const old = await readOld(api);
-      if (old !== null) {
-        moving = old;
-        await secrets.set(SECRET_KEY, old);
-        if (!(await forgetOld(api)) && (await readOld(api)) !== null) hints.add(api);
-      }
+    if ((await secrets.get(SECRET_KEY)) === null && !(await moveOld(api, secrets, moving))) {
+      // A vault that could not be read is not an empty one: try again at the next start.
+      return;
     }
     await secrets.set(MIGRATED_KEY, "1");
   } catch (caught) {
     const message = caught instanceof Error ? caught.message : "failed";
     api.log("vault_migration_failed", {
-      message: moving === "" ? message : message.replaceAll(moving, "[token]"),
+      message: moving.token === "" ? message : message.replaceAll(moving.token, "[token]"),
     });
   }
 }
 
-async function readOld(api: LoginApi): Promise<string | null> {
+/** Copy the old vault token into secrets and forget it. False when the vault could not be read. */
+async function moveOld(
+  api: LoginApi,
+  secrets: NonNullable<LoginApi["secrets"]>,
+  moving: { token: string },
+): Promise<boolean> {
+  const old = await readOld(api);
+  if (old === undefined) return false;
+  if (old === null) return true;
+  moving.token = old;
+  await secrets.set(SECRET_KEY, old);
+  if (!(await forgetOld(api)) && typeof (await readOld(api)) === "string") hints.add(api);
+  return true;
+}
+
+/** The old vault token; null when there is none (or none this extension can read), undefined when reading failed. */
+async function readOld(api: LoginApi): Promise<string | null | undefined> {
   try {
     const old = await api.vault?.read(VAULT_ENTRY);
     return typeof old === "string" && old !== "" ? old : null;
-  } catch {
-    return null;
+  } catch (caught) {
+    api.log("vault_read_failed", { message: caught instanceof Error ? caught.message : "failed" });
+    return undefined;
   }
 }
 
@@ -178,9 +191,11 @@ export async function removeLogin(api: LoginApi): Promise<boolean> {
       message: caught instanceof Error ? caught.message : "failed",
     });
   }
-  if ((await readOld(api)) === null) return false;
+  const left = await readOld(api);
+  if (left === null || left === undefined) return false;
   await forgetOld(api);
-  return (await readOld(api)) !== null;
+  const after = await readOld(api);
+  return after !== null && after !== undefined;
 }
 
 /** Where the reader makes a personal token, on their own Sentry. */

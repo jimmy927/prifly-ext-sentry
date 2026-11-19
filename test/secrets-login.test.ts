@@ -186,6 +186,15 @@ describe("moving an old vault token into secrets", () => {
     };
     expect(await findLogin(fake.api)).toBeNull();
     expect(fake.secrets.has(SECRET_KEY)).toBe(false);
+    expect(fake.secrets.has(MIGRATED_KEY)).toBe(false);
+    expect(fake.logs.join("\n")).toContain("vault_read_failed");
+    // The next start, with the vault readable again, moves the token.
+    const again = fakePrifly("/x", { secrets: fake.secrets });
+    again.entries.set(VAULT_ENTRY, TOKEN);
+    expect(await findLogin(again.api)).toEqual({ token: TOKEN, user: "" });
+    expect(again.secrets.get(SECRET_KEY)).toBe(TOKEN);
+    expect(again.entries.size).toBe(0);
+    expect(again.secrets.has(MIGRATED_KEY)).toBe(true);
   });
 
   test("an entry the reader made stays; the token is copied and a hint is given once", async () => {
