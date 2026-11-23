@@ -316,12 +316,36 @@ export function issueEvent(creds: Creds, org: string, id: string, which: string)
   return call(creds, "GET", `/organizations/${enc(org)}/issues/${enc(id)}/events/${enc(which)}/`);
 }
 
-export type StatusChange = "resolved" | "unresolved" | "ignored";
+export type StatusChange = "resolved" | "unresolved" | "ignored" | "ignored_forever";
 
 /**
- * An issue resolved, reopened, or archived until it escalates — the one write
- * this extension makes, and only from a menu the reader chose. Archiving also
- * takes the issue off the reader's bookmarks, Sentry's favourites.
+ * The body of the status update. "ignored" archives until escalating, so
+ * Sentry brings the issue back as Escalating on a spike; "ignored_forever"
+ * archives it for good (substatus archived_forever, listed in Sentry's
+ * "Bulk Mutate an Organization's Issues" docs) and it is never labelled
+ * escalating. Either takes the issue off the reader's bookmarks.
+ */
+export function statusBody(status: StatusChange): Json {
+  if (status === "ignored")
+    return {
+      status,
+      statusDetails: {},
+      substatus: "archived_until_escalating",
+      isBookmarked: false,
+    };
+  if (status === "ignored_forever")
+    return {
+      status: "ignored",
+      statusDetails: {},
+      substatus: "archived_forever",
+      isBookmarked: false,
+    };
+  return { status };
+}
+
+/**
+ * An issue resolved, reopened, or archived — the one write this extension
+ * makes, and only from a menu the reader chose.
  */
 export async function setStatus(
   creds: Creds,
@@ -329,9 +353,6 @@ export async function setStatus(
   id: string,
   status: StatusChange,
 ): Promise<void> {
-  const body: Json =
-    status === "ignored"
-      ? { status, statusDetails: {}, substatus: "archived_until_escalating", isBookmarked: false }
-      : { status };
+  const body = statusBody(status);
   await call(creds, "PUT", `/organizations/${enc(org)}/issues/${enc(id)}/`, {}, body);
 }

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { looksLikeToken } from "../auth";
 import { alreadyStarted, matches } from "../index";
 import { columnOf, issueChip, issueFace, statusActions } from "../issue-face";
-import { readIssue, readNotes, shortRelease } from "../sentry";
+import { readIssue, readNotes, shortRelease, statusBody } from "../sentry";
 import { ago, when } from "../time";
 import {
   expandHome,
@@ -190,13 +190,29 @@ describe("issues", () => {
     const chip = issueChip(issue, NOW);
     expect(chip.label).toBe("SHOP-1A2: KeyError: 'basket'");
     expect(chip.url).toBe(issue.permalink);
-    expect(chip.actions?.map((a) => a.id)).toEqual(["resolve", "ignore"]);
+    expect(chip.actions?.map((a) => a.id)).toEqual(["resolve", "ignore", "ignore_forever"]);
     const resolved = issueChip({ ...issue, status: "resolved", substatus: "" }, NOW);
     expect(resolved).toMatchObject({
       tone: "good",
       icon: "sentry",
       label: "SHOP-1A2 resolved: KeyError: 'basket'",
     });
+    const menu = statusActions(issue);
+    expect(menu.find((a) => a.id === "ignore_forever")?.label).toBe("Ignore forever");
+    expect(menu.find((a) => a.id === "ignore")?.label).toBe("Archive until it escalates");
+    expect(statusBody("ignored")).toEqual({
+      status: "ignored",
+      statusDetails: {},
+      substatus: "archived_until_escalating",
+      isBookmarked: false,
+    });
+    expect(statusBody("ignored_forever")).toEqual({
+      status: "ignored",
+      statusDetails: {},
+      substatus: "archived_forever",
+      isBookmarked: false,
+    });
+    expect(statusBody("resolved")).toEqual({ status: "resolved" });
     expect(statusActions({ ...issue, status: "ignored" }).map((a) => a.id)).toEqual(["unresolve"]);
   });
 

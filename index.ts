@@ -474,6 +474,7 @@ export async function launched(_launchId: string, key: string, sessionId: string
 const CHANGES: Record<string, { status: StatusChange; said: string }> = {
   resolve: { status: "resolved", said: "Resolved" },
   ignore: { status: "ignored", said: "Archived until it escalates:" },
+  ignore_forever: { status: "ignored_forever", said: "Ignored forever:" },
   unresolve: { status: "unresolved", said: "Reopened" },
 };
 

@@ -106,6 +106,12 @@ export function statusActions(issue: Issue): DecorationAction[] {
       confirm: `${issue.shortId} “${name}” leaves the unresolved list until it happens much more often, and your bookmarks for good.`,
       destructive: true,
     },
+    {
+      id: "ignore_forever",
+      label: "Ignore forever",
+      confirm: `${issue.shortId} “${name}” leaves the unresolved list for good: Sentry never brings it back as escalating, and it leaves your bookmarks.`,
+      destructive: true,
+    },
   ];
 }
 
