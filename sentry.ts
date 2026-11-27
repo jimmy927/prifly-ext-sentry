@@ -102,6 +102,8 @@ function neededPermission(method: string, path: string): string {
   if (path === "/auth/" || path === "/organizations/") return "Organization: Read";
   if (/^\/organizations\/[^/]+\/code-mappings\/$/.test(path)) return "Organization: Read";
   if (/^\/organizations\/[^/]+\/projects\/$/.test(path)) return "Project: Read";
+  if (/^\/organizations\/[^/]+\/replays\//.test(path)) return "Organization: Read";
+  if (/^\/projects\/[^/]+\/[^/]+\/replays\//.test(path)) return "Project: Read";
   if (method === "PUT") return "Issue & Event: Read & Write";
   return "Issue & Event: Read";
 }
@@ -314,6 +316,41 @@ export async function issueEvents(
 /** One event of an issue: `latest`, `oldest`, `recommended` or an event id; whole, as Sentry returns it. */
 export function issueEvent(creds: Creds, org: string, id: string, which: string): Promise<unknown> {
   return call(creds, "GET", `/organizations/${enc(org)}/issues/${enc(id)}/events/${enc(which)}/`);
+}
+
+/** A session replay's facts (`data` of Sentry's answer), as Sentry returns them. */
+export async function replayDetail(creds: Creds, org: string, id: string): Promise<unknown> {
+  return obj(await call(creds, "GET", `/organizations/${enc(org)}/replays/${enc(id)}/`))["data"];
+}
+
+/** Sentry hands out at most this many recording segments per page. */
+const SEGMENT_PAGE = 100;
+
+/**
+ * Every recording segment of a replay, in order: each a list of rrweb events.
+ * The list endpoint streams the segments themselves (not metadata), a page of
+ * at most 100 at a time; its cursor is an offset paginator's `per_page:page:0`.
+ * `project` may be the project's numeric id.
+ */
+export async function replaySegments(
+  creds: Creds,
+  org: string,
+  project: string,
+  id: string,
+): Promise<unknown[]> {
+  const path = `/projects/${enc(org)}/${enc(project)}/replays/${enc(id)}/recording-segments/`;
+  const segments: unknown[] = [];
+  for (let page = 0; page < 50; page += 1) {
+    const found = arr(
+      await call(creds, "GET", path, {
+        per_page: String(SEGMENT_PAGE),
+        cursor: `${SEGMENT_PAGE}:${page}:0`,
+      }),
+    );
+    segments.push(...found);
+    if (found.length < SEGMENT_PAGE) break;
+  }
+  return segments;
 }
 
 export type StatusChange = "resolved" | "unresolved" | "ignored" | "ignored_forever";

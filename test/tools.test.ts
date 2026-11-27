@@ -7,6 +7,7 @@ import { sentryTools } from "../tools";
 import { load } from "../world";
 import { type FakePrifly, fakePrifly } from "./fake-prifly";
 import { pythonEvent, rawIssue } from "./fixtures";
+import { rawReplay, segments } from "./replay-fixtures";
 
 const TOKEN = "sntryu_0123456789abcdef0123456789abcdef0123456789";
 const REGION = "https://de.sentry.io";
@@ -79,6 +80,7 @@ describe("the tools", () => {
       "sentry_issue",
       "sentry_events",
       "sentry_event",
+      "sentry_replay",
     ]);
     for (const tool of tools.values()) {
       expect(tool.name).toMatch(/^[a-z][a-z0-9_]{0,47}$/);
@@ -262,6 +264,58 @@ describe("sentry_event", () => {
     await expect(
       tools.get("sentry_event")?.call({ issue: "5001", save: true }, ctx),
     ).rejects.toThrow("no scratchpad folder (no transcript)");
+  });
+});
+
+describe("sentry_replay", () => {
+  const id = rawReplay.id;
+  const answers = {
+    [`/api/0/organizations/acme/replays/${id}/`]: { data: rawReplay },
+    [`/api/0/projects/acme/42/replays/${id}/recording-segments/`]: segments,
+  };
+
+  test("reads the replay, then its segments by project id, and tells a timeline", async () => {
+    const seen = fakeFetch(answers);
+    const { call } = await setup();
+    const out = await call("sentry_replay", {
+      replay: `https://acme.sentry.io/replays/${id}/`,
+      around: "2026-11-27T14:30:02Z",
+      window: 5,
+    });
+    expect(seen.map((one) => one.url.pathname)).toEqual(Object.keys(answers));
+    const params = (seen[1] as Seen).url.searchParams;
+    expect(params.get("per_page")).toBe("100");
+    expect(params.get("cursor")).toBe("100:0:0");
+    expect(out).toContain(`# Replay ${id}`);
+    expect(out).toContain("⚑ Google Translate");
+    expect(out).not.toContain("DOM snapshot");
+  });
+
+  test("save writes the replay and its raw segments", async () => {
+    fakeFetch(answers);
+    const { call, scratchpad } = await setup();
+    const out = await call("sentry_replay", { replay: id, save: true });
+    const path = join(scratchpad, `sentry-replay-${id}.json`);
+    expect(out).toStartWith(`Saved the replay and its raw segments to ${path}`);
+    expect(JSON.parse(readFileSync(path, "utf8"))).toEqual({ replay: rawReplay, segments });
+  });
+
+  test("refuses what is not a replay, and a bad time", async () => {
+    fakeFetch(answers);
+    const { call } = await setup();
+    await expect(call("sentry_replay", { replay: "PROJ-1" })).rejects.toThrow("Not a replay id");
+    await expect(call("sentry_replay", { replay: id, around: "soon" })).rejects.toThrow(
+      "`around` is not a time",
+    );
+  });
+
+  test("a 403 on the segments names Project: Read", async () => {
+    fakeFetch({
+      [`/api/0/organizations/acme/replays/${id}/`]: { data: rawReplay },
+      [`/api/0/projects/acme/42/replays/${id}/recording-segments/`]: new Failure(403),
+    });
+    const { call } = await setup();
+    await expect(call("sentry_replay", { replay: id })).rejects.toThrow("Project: Read");
   });
 });
 

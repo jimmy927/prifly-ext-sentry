@@ -233,10 +233,16 @@ is not started: the New session form would have asked for the folder.
   it. It keeps showing the issue's current status after it leaves the
   unresolved list.
 - **Sentry tools for every session** — `sentry_search`, `sentry_issue`,
-  `sentry_events` and `sentry_event` (a prifly session sees them as
+  `sentry_events`, `sentry_event` and `sentry_replay` (a prifly session sees them as
   `mcp__prifly__sentry_…`): search issues, read an issue with its latest event
   summarised, list an issue's events, read one event, and save an event's whole
-  JSON to the session's scratchpad. The extension makes the calls with your
+  JSON to the session's scratchpad. `sentry_replay` reads a session replay
+  (`replay.ts`, `dom.ts`) as a timeline: page loads, clicks, inputs, fetch/XHR
+  calls, console lines, and DOM mutations per second with text before → after,
+  `<html>` attribute changes, and the traces Google Translate, Edge Translator,
+  Grammarly or a password manager leave flagged; `around` narrows it to a
+  moment, `save` writes the raw rrweb segments. The token needs Organization:
+  Read and Project: Read for it. The extension makes the calls with your
   login, so a session never holds the token. They only read; resolving and
   archiving stay on the issue chip.
 - **A Claude Code skill** — `skills/sentry`, for a terminal outside prifly:

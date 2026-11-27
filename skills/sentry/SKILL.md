@@ -11,6 +11,7 @@ description: For a terminal outside prifly only (the reader sets SENTRY_AUTH_TOK
 - `sentry_issue` — one issue (short id `PROJ-1A2`, numeric id or issue URL): status, counts, notes and its latest event (in-app frames, breadcrumbs, request, tags).
 - `sentry_events` — an issue's events, newest first.
 - `sentry_event` — one event (`latest`, `oldest`, `recommended` or an event id); `save` writes the whole event JSON to your scratchpad and returns the path.
+- `sentry_replay` — a session replay (an event's `replayId` tag, or a replay URL) as a timeline of navigations, clicks, network calls, console lines and DOM changes, extension and translator traces flagged; `around` an ISO time narrows it, `save` writes the raw segments.
 
 All take an optional `org`. They only read: resolving and archiving are done from the issue's chip on the session banner. If a tool says Sentry is not logged in, tell the reader to log in from “From a Sentry issue…”; never ask for a token in chat.
 

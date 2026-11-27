@@ -18,6 +18,7 @@ import { issueMarkdown } from "./issue-prompt";
 import type { ExtensionTool, ExtensionToolContext } from "./prifly-api";
 import { clip, obj, str } from "./read";
 import { apiBase, ensureRegion } from "./region";
+import { eventsOf, readReplay, replayIdOf, replayText } from "./replay";
 import {
   type Creds,
   type Issue,
@@ -27,6 +28,8 @@ import {
   latestEvent,
   organizationIssues,
   readNotes,
+  replayDetail,
+  replaySegments,
   resolveIssueId,
   SentryError,
   type Sort,
@@ -198,7 +201,77 @@ export function sentryTools(world: () => World | null): ExtensionTool[] {
             .join("\n\n");
         }),
     },
+    replayTool(run),
   ];
+}
+
+type Run = (
+  args: Record<string, unknown>,
+  work: (connection: Connection) => Promise<string>,
+) => Promise<string>;
+
+/** `sentry_replay`: a session replay as a timeline (`replay.ts`). */
+function replayTool(run: Run): ExtensionTool {
+  return {
+    name: "sentry_replay",
+    description:
+      "A Sentry session replay (read-only) as a readable timeline: page loads and navigations, clicks and inputs, fetch/XHR calls with status and time, console lines, and DOM mutations grouped per second — with text before → after, `<html>` attribute changes (lang, class), and ⚑ on traces a browser extension or translator left (Google Translate's <font> and translated-ltr, Edge Translator, Grammarly, password managers). Give a replay id or URL (an event's `replayId` tag); `around` (an ISO time, e.g. the error's) with `window` seconds narrows it to that moment. With `save` the replay and every raw rrweb segment are written to your scratchpad as JSON.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        replay: {
+          type: "string",
+          description: "A replay id (32 hex characters) or a Sentry replay URL.",
+        },
+        around: {
+          type: "string",
+          description: "Only the timeline near this moment: an ISO time like 2026-11-27T14:30:03Z.",
+        },
+        window: {
+          type: "number",
+          description: "Seconds either side of `around` (default 30, up to 600).",
+        },
+        limit: {
+          type: "number",
+          description: "At most this many timeline lines (default 400, up to 3000).",
+        },
+        save: {
+          type: "boolean",
+          description:
+            "Write the replay's facts and all its raw recording segments to the session's scratchpad and return the path.",
+        },
+        org: ORG_PROPERTY,
+      },
+      required: ["replay"],
+    },
+    call: (args, ctx) => run(args, (connection) => replayTimeline(connection, args, ctx)),
+  };
+}
+
+async function replayTimeline(
+  { creds, org }: Connection,
+  args: Record<string, unknown>,
+  ctx: ExtensionToolContext,
+): Promise<string> {
+  const ref = required(args, "replay");
+  const id = replayIdOf(ref);
+  if (id === "") throw new Error(`Not a replay id or replay URL: ${ref}`);
+  const around = text(args["around"]);
+  const at = around === "" ? null : Date.parse(around);
+  if (at !== null && Number.isNaN(at)) throw new Error(`\`around\` is not a time: ${around}`);
+  const raw = await replayDetail(creds, org, id);
+  const facts = readReplay(raw);
+  if (facts.id === "") throw new Error(`Sentry has no replay ${id} in ${org}.`);
+  const segments = await replaySegments(creds, org, facts.projectId, id);
+  const saved =
+    args["save"] === true
+      ? `Saved the replay and its raw segments to ${await saveJson(ctx, `sentry-replay-${id}.json`, { replay: raw, segments })}\n\n`
+      : "";
+  return `${saved}${replayText(facts, eventsOf(segments), {
+    around: at,
+    window: limitOf(args["window"], 30, 600),
+    limit: limitOf(args["limit"], 400, 3000),
+  })}`;
 }
 
 /** The issue's facts and notes, then its latest event; the heading is the one the session prompt uses. */
@@ -242,6 +315,12 @@ async function saveEvent(
   id: string,
   event: unknown,
 ): Promise<string> {
+  const name = `sentry-${safeName(issue.shortId || id)}-${safeName(eventId(event) || "event")}.json`;
+  return `Saved the whole event JSON to ${await saveJson(ctx, name, event)}`;
+}
+
+/** Writes `value` as JSON into the session's scratchpad under `name`; returns the path. */
+async function saveJson(ctx: ExtensionToolContext, name: string, value: unknown): Promise<string> {
   let folder: string;
   try {
     folder = ctx.scratchpad;
@@ -249,10 +328,9 @@ async function saveEvent(
     const why = caught instanceof Error ? caught.message : String(caught);
     throw new Error(`Cannot save: this session has no scratchpad folder (${why}).`);
   }
-  const name = `sentry-${safeName(issue.shortId || id)}-${safeName(eventId(event) || "event")}.json`;
   const path = join(folder, name);
-  await writeFile(path, `${JSON.stringify(event, null, 1)}\n`);
-  return `Saved the whole event JSON to ${path}`;
+  await writeFile(path, `${JSON.stringify(value, null, 1)}\n`);
+  return path;
 }
 
 function safeName(value: string): string {
